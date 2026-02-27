@@ -1,96 +1,102 @@
-"""Embedded SSH terminal widget with basic ANSI colour rendering."""
+"""
+Embedded SSH terminal widget backed by a pyte VT100 screen buffer.
+
+Architecture
+------------
+  Raw bytes (SSH) ──► pyte.ByteStream ──► pyte.HistoryScreen
+                                                  │
+                             QTimer (16 ms) ──────┘ triggers _render()
+                                                  │
+                         _PyteTerminal (QPlainTextEdit) ◄── draws screen
+"""
 
 from __future__ import annotations
 
-import re
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QPlainTextEdit
-from PyQt6.QtGui import QFont, QTextCursor, QKeyEvent, QColor, QPalette, QTextCharFormat
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+import pyte
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QKeyEvent, QPalette, QTextCharFormat, QTextCursor
+from PyQt6.QtWidgets import (
+    QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+)
 
 from src.models.connection import Connection
 from src.protocols.ssh import SSHWorker
 
-# One regex to match ANY escape sequence:
-#   group 1 = CSI params   group 2 = CSI final letter
-#   group 3 = OSC text     group 4 = two-char Esc+X
-_ESC_RE = re.compile(
-    r'\x1b(?:'
-    r'\[([0-9;?]*)([A-Za-z@`])'        # CSI  ESC [ params final
-    r'|\]([^\x07\x1b]*)(?:\x07|\x1b\\)'# OSC  ESC ] ... BEL/ST
-    r'|([^[\]])'                        # Two-char  ESC + single char
-    r')',
-    re.DOTALL,
-)
+# ── Terminal dimensions (must match what SSHWorker requests from paramiko) ──
+_PTY_COLS = 200
+_PTY_ROWS = 50
+_HISTORY  = 2000   # scrollback lines kept in pyte
 
-# Control characters that are truly non-printable in our simple display
-# (keep \t=9, \n=10; everything else below 0x20 and DEL=0x7f is stripped)
-_CTRL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
-
-# ANSI 3-bit colour table (indices 30-37 / 40-47)
-_ANSI_FG = {
-    30: "#1e1e1e", 31: "#e06c75", 32: "#98c379", 33: "#e5c07b",
-    34: "#61afef", 35: "#c678dd", 36: "#56b6c2", 37: "#abb2bf",
-    # bright 90-97
-    90: "#5c6370", 91: "#e06c75", 92: "#98c379", 93: "#e5c07b",
-    94: "#61afef", 95: "#c678dd", 96: "#56b6c2", 97: "#ffffff",
-}
-_ANSI_BG = {
-    40: "#1e1e1e", 41: "#e06c75", 42: "#98c379", 43: "#e5c07b",
-    44: "#61afef", 45: "#c678dd", 46: "#56b6c2", 47: "#abb2bf",
-    100: "#5c6370", 101: "#e06c75", 102: "#98c379", 103: "#e5c07b",
-    104: "#61afef", 105: "#c678dd", 106: "#56b6c2", 107: "#ffffff",
-}
+# ── Colour defaults (One Dark) ──────────────────────────────────────────────
 _DEFAULT_FG = "#d4d4d4"
 _DEFAULT_BG = "#1e1e1e"
+_CURSOR_BG  = "#528bff"
+
+# Named ANSI colours → One Dark palette
+_NAMED: dict[str, str] = {
+    "black":         "#282c34", "red":           "#e06c75",
+    "green":         "#98c379", "yellow":        "#e5c07b",
+    "blue":          "#61afef", "magenta":       "#c678dd",
+    "cyan":          "#56b6c2", "white":         "#abb2bf",
+    "brightblack":   "#5c6370", "brightred":     "#e06c75",
+    "brightgreen":   "#98c379", "brightyellow":  "#e5c07b",
+    "brightblue":    "#61afef", "brightmagenta": "#c678dd",
+    "brightcyan":    "#56b6c2", "brightwhite":   "#ffffff",
+}
+
+
+# ── Colour helpers ───────────────────────────────────────────────────────────
+
+def _pyte_color(value: object, is_fg: bool) -> str:
+    """Convert a pyte colour value (string, int, tuple) to #RRGGBB."""
+    if not value or value == "default":
+        return _DEFAULT_FG if is_fg else _DEFAULT_BG
+    if isinstance(value, int):          # 256-colour index
+        return _xterm256(value)
+    if isinstance(value, (tuple, list)) and len(value) == 3:  # truecolour
+        return "#{:02x}{:02x}{:02x}".format(int(value[0]), int(value[1]), int(value[2]))
+    if isinstance(value, str):
+        # pyte stores 256/TC colours as 6-char hex without '#'
+        if len(value) == 6 and all(c in "0123456789abcdefABCDEF" for c in value):
+            return f"#{value}"
+        return _NAMED.get(value, _DEFAULT_FG if is_fg else _DEFAULT_BG)
+    return _DEFAULT_FG if is_fg else _DEFAULT_BG
 
 
 def _xterm256(n: int) -> str:
-    """Return a hex colour string for an xterm 256-colour index."""
+    """xterm 256-colour index → #RRGGBB."""
     if n < 16:
-        # System colours — use our One Dark palette where available
-        sys_colours = [
-            "#1e1e1e", "#e06c75", "#98c379", "#e5c07b",
-            "#61afef", "#c678dd", "#56b6c2", "#abb2bf",
-            "#5c6370", "#e06c75", "#98c379", "#e5c07b",
-            "#61afef", "#c678dd", "#56b6c2", "#ffffff",
-        ]
-        return sys_colours[n]
+        vals = list(_NAMED.values())
+        return vals[n % 16]
     if n < 232:
-        # 6x6x6 colour cube
         n -= 16
-        b = n % 6;  n //= 6
-        g = n % 6;  r = n // 6
+        b = n % 6; n //= 6
+        g = n % 6; r = n // 6
         def v(x: int) -> int: return 0 if x == 0 else 55 + x * 40
         return f"#{v(r):02x}{v(g):02x}{v(b):02x}"
-    # Greyscale ramp
     grey = 8 + (n - 232) * 10
     return f"#{grey:02x}{grey:02x}{grey:02x}"
 
 
+# ── Main widget ──────────────────────────────────────────────────────────────
+
 class TerminalWidget(QWidget):
     """
-    Right-panel widget that embeds an interactive SSH session.
-
-    Architecture:
-      - SSHWorker runs in a QThread
-      - Incoming bytes are ANSI-stripped and appended to QPlainTextEdit
-      - Key events are forwarded to SSHWorker.send()
+    Right-panel widget that opens an interactive SSH session and embeds a
+    full VT100 terminal emulator (pyte) so programs like vim / htop work.
     """
 
     status_message = pyqtSignal(str)
-    disconnected = pyqtSignal(str)
+    disconnected   = pyqtSignal(str)
 
     def __init__(self, connection: Connection, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._conn = connection
-        self._thread: QThread | None = None
+        self._conn   = connection
+        self._thread: QThread | None   = None
         self._worker: SSHWorker | None = None
-
         self._build_ui()
 
-    # ------------------------------------------------------------------
-    # UI
-    # ------------------------------------------------------------------
+    # ── UI ──────────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -103,31 +109,28 @@ class TerminalWidget(QWidget):
         header.setFixedHeight(32)
         hbar = QHBoxLayout(header)
         hbar.setContentsMargins(10, 0, 10, 0)
-
         self._title_lbl = QLabel(f"🔑  {self._conn.connection_string()}")
         self._title_lbl.setStyleSheet("color: #ccc; font-size: 12px;")
         hbar.addWidget(self._title_lbl)
         hbar.addStretch()
-
         btn_disc = QPushButton("✕ Disconnect")
         btn_disc.setStyleSheet(
-            "QPushButton { color: #f55; background: transparent; border: none; }"
-            "QPushButton:hover { color: #fff; }"
+            "QPushButton{color:#f55;background:transparent;border:none;}"
+            "QPushButton:hover{color:#fff;}"
         )
         btn_disc.clicked.connect(self._on_disconnect)
         hbar.addWidget(btn_disc)
-
         layout.addWidget(header)
 
-        # Terminal output area
-        self._output = _TerminalEdit(self)
+        # Terminal area
+        self._output = _PyteTerminal(self)
         self._output.key_pressed.connect(self._on_key)
         layout.addWidget(self._output)
 
         # Status bar
         self._status = QLabel("Connecting…")
         self._status.setStyleSheet(
-            "background: #1e1e1e; color: #888; padding: 2px 8px; font-size: 11px;"
+            "background:#1e1e1e;color:#888;padding:2px 8px;font-size:11px;"
         )
         layout.addWidget(self._status)
 
@@ -135,21 +138,17 @@ class TerminalWidget(QWidget):
         self._status.setText(msg)
         self.status_message.emit(msg)
 
-    # ------------------------------------------------------------------
-    # Connection lifecycle
-    # ------------------------------------------------------------------
+    # ── Connection lifecycle ─────────────────────────────────────────────────
 
     def start_connection(self) -> None:
         self._thread = QThread(self)
         self._worker = SSHWorker(self._conn)
         self._worker.moveToThread(self._thread)
-
         self._thread.started.connect(self._worker.run)
         self._worker.connected.connect(self._on_connected)
         self._worker.data_received.connect(self._on_data)
         self._worker.error.connect(self._on_error)
         self._worker.finished.connect(self._on_finished)
-
         self._thread.start()
 
     def _on_disconnect(self) -> None:
@@ -157,41 +156,34 @@ class TerminalWidget(QWidget):
             self._worker.disconnect()
         self._set_status("Disconnected.")
 
-    # ------------------------------------------------------------------
-    # Worker signals
-    # ------------------------------------------------------------------
+    # ── Worker signals ───────────────────────────────────────────────────────
 
     def _on_connected(self) -> None:
         self._set_status(f"Connected to {self._conn.connection_string()}")
         self._output.setFocus()
 
     def _on_data(self, raw: bytes) -> None:
-        text = raw.decode("utf-8", errors="replace")
-        self._output.append_ansi(text)
+        self._output.feed(raw)
 
     def _on_error(self, msg: str) -> None:
         self._set_status(f"Error: {msg}")
-        self._output.append_text(f"\r\n\033[31m*** {msg} ***\033[0m\r\n")
+        self._output.feed(f"\r\n\x1b[31m*** {msg} ***\x1b[0m\r\n".encode())
         self.disconnected.emit(f"Error: {msg}")
 
     def _on_finished(self) -> None:
         self._set_status("Session closed.")
-        self._output.append_text("\r\n[Session closed]\r\n")
+        self._output.feed(b"\r\n[Session closed]\r\n")
         if self._thread:
             self._thread.quit()
         self.disconnected.emit("Session closed.")
 
-    # ------------------------------------------------------------------
-    # Keyboard input forwarding
-    # ------------------------------------------------------------------
+    # ── Key forwarding ───────────────────────────────────────────────────────
 
     def _on_key(self, data: bytes) -> None:
         if self._worker:
             self._worker.send(data)
 
-    # ------------------------------------------------------------------
-    # Cleanup
-    # ------------------------------------------------------------------
+    # ── Cleanup ──────────────────────────────────────────────────────────────
 
     def closeEvent(self, event) -> None:
         self._on_disconnect()
@@ -201,204 +193,223 @@ class TerminalWidget(QWidget):
         super().closeEvent(event)
 
 
-class _TerminalEdit(QPlainTextEdit):
+# ── pyte-backed QPlainTextEdit ───────────────────────────────────────────────
+
+class _PyteTerminal(QPlainTextEdit):
     """
-    Read-only display with special key capture.
-    Keys are NOT inserted locally — they are sent to the SSH worker
-    and the server's echo appears as incoming data.
+    QPlainTextEdit driven by a pyte.HistoryScreen state machine.
+
+    - Raw bytes feed into pyte, which handles ALL VT100/xterm sequences:
+      cursor movement, alternate screen, erase, colour, reverse video, etc.
+    - A 16 ms QTimer coalesces rapid updates into at most 60 fps redraws.
+    - History rows are appended once (never redrawn); only the live screen
+      (_PTY_ROWS lines) is re-rendered on every frame.
     """
 
     key_pressed = pyqtSignal(bytes)
 
-    # Maps Qt key codes → ANSI escape sequences
-    _KEY_MAP = {
-        Qt.Key.Key_Up:        b"\x1b[A",
-        Qt.Key.Key_Down:      b"\x1b[B",
-        Qt.Key.Key_Right:     b"\x1b[C",
-        Qt.Key.Key_Left:      b"\x1b[D",
-        Qt.Key.Key_Home:      b"\x1b[H",
-        Qt.Key.Key_End:       b"\x1b[F",
-        Qt.Key.Key_PageUp:    b"\x1b[5~",
-        Qt.Key.Key_PageDown:  b"\x1b[6~",
-        Qt.Key.Key_Delete:    b"\x1b[3~",
-        Qt.Key.Key_F1:        b"\x1bOP",
-        Qt.Key.Key_F2:        b"\x1bOQ",
-        Qt.Key.Key_F3:        b"\x1bOR",
-        Qt.Key.Key_F4:        b"\x1bOS",
+    # Qt key → ANSI/VT sequence
+    _KEY_MAP: dict[int, bytes] = {
+        Qt.Key.Key_Up:       b"\x1b[A",
+        Qt.Key.Key_Down:     b"\x1b[B",
+        Qt.Key.Key_Right:    b"\x1b[C",
+        Qt.Key.Key_Left:     b"\x1b[D",
+        Qt.Key.Key_Home:     b"\x1b[H",
+        Qt.Key.Key_End:      b"\x1b[F",
+        Qt.Key.Key_PageUp:   b"\x1b[5~",
+        Qt.Key.Key_PageDown: b"\x1b[6~",
+        Qt.Key.Key_Delete:   b"\x1b[3~",
+        Qt.Key.Key_Insert:   b"\x1b[2~",
+        Qt.Key.Key_F1:       b"\x1bOP",
+        Qt.Key.Key_F2:       b"\x1bOQ",
+        Qt.Key.Key_F3:       b"\x1bOR",
+        Qt.Key.Key_F4:       b"\x1bOS",
+        Qt.Key.Key_F5:       b"\x1b[15~",
+        Qt.Key.Key_F6:       b"\x1b[17~",
+        Qt.Key.Key_F7:       b"\x1b[18~",
+        Qt.Key.Key_F8:       b"\x1b[19~",
+        Qt.Key.Key_F9:       b"\x1b[20~",
+        Qt.Key.Key_F10:      b"\x1b[21~",
+        Qt.Key.Key_F11:      b"\x1b[23~",
+        Qt.Key.Key_F12:      b"\x1b[24~",
     }
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+
+        # pyte state machine with scrollback
+        self.screen = pyte.HistoryScreen(_PTY_COLS, _PTY_ROWS, history=_HISTORY)
+        self.stream = pyte.ByteStream(self.screen)
+
+        # Render throttle
+        self._pending = False
+        self._timer   = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._render)
+
+        # How many history rows are already in the document
+        self._rendered_history = 0
+
+        # Widget appearance
         self.setReadOnly(True)
         self.setUndoRedoEnabled(False)
-
         font = QFont("Menlo", 13)
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.setFont(font)
-
-        # Dark terminal palette
         pal = self.palette()
-        pal.setColor(QPalette.ColorRole.Base, QColor("#1e1e1e"))
-        pal.setColor(QPalette.ColorRole.Text, QColor("#d4d4d4"))
+        pal.setColor(QPalette.ColorRole.Base, QColor(_DEFAULT_BG))
+        pal.setColor(QPalette.ColorRole.Text, QColor(_DEFAULT_FG))
         self.setPalette(pal)
-        self.setStyleSheet("border: none; padding: 6px;")
+        self.setStyleSheet("border: none; padding: 4px;")
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
-        # Current character format (updated by SGR codes)
-        self._fmt = QTextCharFormat()
-        self._fmt.setForeground(QColor(_DEFAULT_FG))
-        self._fmt.setBackground(QColor(_DEFAULT_BG))
+    # ── Public API ───────────────────────────────────────────────────────────
 
-    def append_text(self, text: str) -> None:
-        """Append plain text (ANSI-aware fallback — routes through append_ansi)."""
-        self.append_ansi(text)
+    def feed(self, raw: bytes) -> None:
+        """Feed raw bytes from the SSH channel; schedule a redraw."""
+        self.stream.feed(raw)
+        if not self._pending:
+            self._pending = True
+            self._timer.start()
 
-    def append_ansi(self, text: str) -> None:
+    # ── Rendering ────────────────────────────────────────────────────────────
+
+    def _render(self) -> None:
         """
-        Append text to the terminal, correctly handling ANSI escape sequences.
-
-        Every escape sequence is matched by _ESC_RE.  Only SGR (colour) and
-        ED/EL (erase) codes produce visible effects; everything else is silently
-        consumed.  Plain-text segments are cleaned of control characters before
-        insertion so no cube glyphs appear.
+        Incremental render:
+          1. Append any new scrollback rows (written once, never redrawn).
+          2. Replace the live screen section with fresh content from pyte.
         """
-        cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self._pending = False
 
-        pos = 0
-        for m in _ESC_RE.finditer(text):
-            # -- plain text segment before this escape --
-            if m.start() > pos:
-                self._insert_plain(cursor, text[pos:m.start()])
+        vbar      = self.verticalScrollBar()
+        at_bottom = vbar.value() >= vbar.maximum() - 4
 
-            csi_params = m.group(1)   # may be '' or None
-            csi_final  = m.group(2)   # e.g. 'm', 'J', 'K', 'A' …
+        doc = self.document()
 
-            if csi_final is not None:
-                # ---- CSI sequence ----
-                if csi_final == 'm':
-                    raw = csi_params or '0'
-                    # DEC private sequences use '?' prefix (e.g. \x1b[?4m).
-                    # They are not SGR — skip them entirely.
-                    if '?' not in raw:
-                        try:
-                            params = [int(p) if p else 0 for p in raw.split(';')]
-                            self._apply_sgr(params, cursor)
-                        except ValueError:
-                            pass  # malformed SGR — ignore silently
+        # ── 1. New history rows ──────────────────────────────────────────
+        history_rows = list(self.screen.history.top)
+        new_count    = len(history_rows)
 
-                elif csi_final == 'J':
-                    # Erase in display
-                    n = int(csi_params) if csi_params and csi_params.isdigit() else 0
-                    if n in (2, 3):
-                        # \x1b[2J or \x1b[3J — clear entire screen
-                        self.clear()
-                        cursor = self.textCursor()
+        if new_count > self._rendered_history:
+            new_rows = history_rows[self._rendered_history:]
 
-                elif csi_final == 'K':
-                    # Erase in line — best we can do is nothing (no 2D buffer)
-                    pass
-                # All other CSI sequences (cursor movement etc.) — ignore
+            hist_block = doc.findBlockByNumber(self._rendered_history)
+            if hist_block.isValid():
+                ins = QTextCursor(hist_block)
+                ins.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            else:
+                ins = QTextCursor(doc)
+                ins.movePosition(QTextCursor.MoveOperation.End)
 
-            # OSC (group 3) and two-char Esc+X (group 4) — ignore
+            ins.beginEditBlock()
+            for row in new_rows:
+                self._render_row(ins, row, -1)
+                ins.insertBlock()
+            ins.endEditBlock()
 
-            pos = m.end()
+            self._rendered_history = new_count
 
-        # -- trailing plain text --
-        if pos < len(text):
-            self._insert_plain(cursor, text[pos:])
+        # ── 2. Re-render live screen ─────────────────────────────────────
+        cx = self.screen.cursor.x
+        cy = self.screen.cursor.y
 
-        self.setTextCursor(cursor)
-        self.ensureCursorVisible()
+        screen_block = doc.findBlockByNumber(self._rendered_history)
+        cur = QTextCursor(doc)
+        cur.beginEditBlock()
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+        if screen_block.isValid():
+            cur.setPosition(screen_block.position())
+        else:
+            cur.movePosition(QTextCursor.MoveOperation.End)
 
-    def _insert_plain(self, cursor: QTextCursor, text: str) -> None:
+        cur.movePosition(
+            QTextCursor.MoveOperation.End,
+            QTextCursor.MoveMode.KeepAnchor,
+        )
+        cur.removeSelectedText()
+
+        for y in range(self.screen.lines):
+            if y > 0 or self._rendered_history > 0 or doc.blockCount() > 1:
+                cur.insertBlock()
+            self._render_row(cur, self.screen.buffer[y], cx if y == cy else -1)
+
+        cur.endEditBlock()
+
+        if at_bottom:
+            vbar.setValue(vbar.maximum())
+
+    def _render_row(
+        self,
+        cursor: QTextCursor,
+        row: object,
+        cursor_x: int,
+    ) -> None:
         """
-        Insert a plain-text chunk, handling line endings and backspace.
-        \r\n  →  \n      (Windows line endings)
-        \r    →  \n      (lone carriage return — move to new line)
-        \x08  →  delete previous character (terminal backspace-erase)
-        everything else below 0x20 and 0x7f → stripped
+        Write one terminal row into the document, merging adjacent cells
+        with identical formatting into a single QTextCharFormat run.
         """
-        # Normalise line endings FIRST so we don't double-process \r\n
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        x    = 0
+        cols = self.screen.columns
 
-        # Split on backspace characters and handle each piece
-        pieces = text.split('\x08')
-        for idx, piece in enumerate(pieces):
-            piece = _CTRL_RE.sub('', piece)   # strip remaining control chars
-            if idx > 0:
-                # A \x08 preceded this piece — delete the char before cursor
-                cursor.deletePreviousChar()
-            if piece:
-                cursor.insertText(piece, self._fmt)
+        while x < cols:
+            # Cursor cell — highlighted block
+            if x == cursor_x:
+                cfmt = QTextCharFormat()
+                cfmt.setBackground(QColor(_CURSOR_BG))
+                cfmt.setForeground(QColor(_DEFAULT_BG))
+                cfmt.setFontWeight(700)
+                cursor.insertText(row[x].data or " ", cfmt)
+                x += 1
+                continue
 
-    def _apply_sgr(self, params: list[int], cursor: QTextCursor) -> None:
-        """Update self._fmt based on a list of SGR parameter integers."""
-        i = 0
-        while i < len(params):
-            p = params[i]
-            if p == 0:
-                self._fmt = QTextCharFormat()
-                self._fmt.setForeground(QColor(_DEFAULT_FG))
-                self._fmt.setBackground(QColor(_DEFAULT_BG))
-            elif p == 1:
-                self._fmt.setFontWeight(700)
-            elif p == 2:
-                self._fmt.setFontWeight(300)   # dim
-            elif p == 22:
-                self._fmt.setFontWeight(400)
-            elif p == 3:
-                self._fmt.setFontItalic(True)
-            elif p == 23:
-                self._fmt.setFontItalic(False)
-            elif p == 4:
-                self._fmt.setFontUnderline(True)
-            elif p == 24:
-                self._fmt.setFontUnderline(False)
-            elif p in _ANSI_FG:
-                self._fmt.setForeground(QColor(_ANSI_FG[p]))
-            elif p == 39:
-                self._fmt.setForeground(QColor(_DEFAULT_FG))
-            elif p in _ANSI_BG:
-                self._fmt.setBackground(QColor(_ANSI_BG[p]))
-            elif p == 49:
-                self._fmt.setBackground(QColor(_DEFAULT_BG))
-            elif p == 38 and i + 2 < len(params) and params[i + 1] == 5:
-                # 256-colour FG: ESC[38;5;Nm
-                idx_256 = params[i + 2]
-                self._fmt.setForeground(QColor(_xterm256(idx_256)))
-                i += 2
-            elif p == 48 and i + 2 < len(params) and params[i + 1] == 5:
-                # 256-colour BG: ESC[48;5;Nm
-                idx_256 = params[i + 2]
-                self._fmt.setBackground(QColor(_xterm256(idx_256)))
-                i += 2
-            elif p == 38 and i + 4 < len(params) and params[i + 1] == 2:
-                # True-colour FG: ESC[38;2;R;G;Bm
-                r, g, b = params[i + 2], params[i + 3], params[i + 4]
-                self._fmt.setForeground(QColor(r, g, b))
-                i += 4
-            elif p == 48 and i + 4 < len(params) and params[i + 1] == 2:
-                # True-colour BG: ESC[48;2;R;G;Bm
-                r, g, b = params[i + 2], params[i + 3], params[i + 4]
-                self._fmt.setBackground(QColor(r, g, b))
-                i += 4
-            i += 1
+            # Start of a new run — read format from the first cell
+            first     = row[x]
+            fg        = _pyte_color(first.fg, True)
+            bg        = _pyte_color(first.bg, False)
+            bold      = first.bold
+            italic    = first.italics
+            underline = first.underscore
+            if first.reverse:
+                fg, bg = bg, fg
+
+            run: list[str] = []
+
+            # Extend the run while the format stays the same
+            while x < cols and x != cursor_x:
+                c   = row[x]
+                cfg = _pyte_color(c.fg, True)
+                cbg = _pyte_color(c.bg, False)
+                if c.reverse:
+                    cfg, cbg = cbg, cfg
+                if (cfg, cbg, c.bold, c.italics, c.underscore) != \
+                   (fg,  bg,  bold,  italic,    underline):
+                    break
+                run.append(c.data or " ")
+                x += 1
+
+            # Insert run with its format
+            fmt = QTextCharFormat()
+            fmt.setForeground(QColor(fg))
+            fmt.setBackground(QColor(bg))
+            if bold:      fmt.setFontWeight(700)
+            if italic:    fmt.setFontItalic(True)
+            if underline: fmt.setFontUnderline(True)
+            cursor.insertText("".join(run), fmt)
+
+    # ── Keyboard handling ─────────────────────────────────────────────────────
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        key = event.key()
+        key  = event.key()
         mods = event.modifiers()
         text = event.text()
 
-        # Ctrl+C / Ctrl+D etc.
+        # Ctrl+[A-Z] → control bytes
         if mods & Qt.KeyboardModifier.ControlModifier:
             char = text.lower()
             if char:
-                code = ord(char) - ord('a') + 1
+                code = ord(char) - ord("a") + 1
                 if 1 <= code <= 26:
                     self.key_pressed.emit(bytes([code]))
                     return
@@ -407,18 +418,15 @@ class _TerminalEdit(QPlainTextEdit):
             self.key_pressed.emit(self._KEY_MAP[key])
             return
 
-        if key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.key_pressed.emit(b"\r")
             return
-
         if key == Qt.Key.Key_Backspace:
             self.key_pressed.emit(b"\x7f")
             return
-
         if key == Qt.Key.Key_Tab:
             self.key_pressed.emit(b"\t")
             return
-
         if key == Qt.Key.Key_Escape:
             self.key_pressed.emit(b"\x1b")
             return
