@@ -47,6 +47,22 @@ _NAMED: dict[str, str] = {
 
 # ── Colour helpers ───────────────────────────────────────────────────────────
 
+class _Screen(pyte.HistoryScreen):
+    """
+    Thin subclass of HistoryScreen that works around a pyte bug:
+    pyte's stream dispatcher calls  select_graphic_rendition(*params, private=True)
+    for DEC private CSI sequences that happen to end in 'm', but pyte's own
+    Screen.select_graphic_rendition() does not accept the 'private' keyword —
+    causing a TypeError crash when programs like vim emit e.g. \x1b[?1m.
+    We accept (and ignore) the private flag here.
+    """
+
+    def select_graphic_rendition(self, *attrs: int, private: bool = False) -> None:
+        if not private:
+            super().select_graphic_rendition(*attrs)
+        # private=True → DEC private SGR variant; not a standard colour code, skip.
+
+
 def _pyte_color(value: object, is_fg: bool) -> str:
     """Convert a pyte colour value (string, int, tuple) to #RRGGBB."""
     if not value or value == "default":
@@ -237,8 +253,8 @@ class _PyteTerminal(QPlainTextEdit):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        # pyte state machine with scrollback
-        self.screen = pyte.HistoryScreen(_PTY_COLS, _PTY_ROWS, history=_HISTORY)
+        # pyte state machine with scrollback (uses patched _Screen subclass)
+        self.screen = _Screen(_PTY_COLS, _PTY_ROWS, history=_HISTORY)
         self.stream = pyte.ByteStream(self.screen)
 
         # Render throttle
