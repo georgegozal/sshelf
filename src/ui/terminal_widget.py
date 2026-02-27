@@ -10,10 +10,21 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from src.models.connection import Connection
 from src.protocols.ssh import SSHWorker
 
-# Match a single CSI SGR sequence: ESC [ <params> m
-_SGR_RE = re.compile(r'\x1b\[([0-9;]*)m')
-# Strip all other escape sequences we don't handle
-_OTHER_ESC_RE = re.compile(r'\x1b(?:[^m\[]|\[[^m]*[^m]|\[[^m]*(?=\Z))')
+# One regex to match ANY escape sequence:
+#   group 1 = CSI params   group 2 = CSI final letter
+#   group 3 = OSC text     group 4 = two-char Esc+X
+_ESC_RE = re.compile(
+    r'\x1b(?:'
+    r'\[([0-9;?]*)([A-Za-z@`])'        # CSI  ESC [ params final
+    r'|\]([^\x07\x1b]*)(?:\x07|\x1b\\)'# OSC  ESC ] ... BEL/ST
+    r'|([^[\]])'                        # Two-char  ESC + single char
+    r')',
+    re.DOTALL,
+)
+
+# Control characters that are truly non-printable in our simple display
+# (keep \t=9, \n=10; everything else below 0x20 and DEL=0x7f is stripped)
+_CTRL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
 # ANSI 3-bit colour table (indices 30-37 / 40-47)
 _ANSI_FG = {
@@ -31,6 +42,29 @@ _ANSI_BG = {
 }
 _DEFAULT_FG = "#d4d4d4"
 _DEFAULT_BG = "#1e1e1e"
+
+
+def _xterm256(n: int) -> str:
+    """Return a hex colour string for an xterm 256-colour index."""
+    if n < 16:
+        # System colours — use our One Dark palette where available
+        sys_colours = [
+            "#1e1e1e", "#e06c75", "#98c379", "#e5c07b",
+            "#61afef", "#c678dd", "#56b6c2", "#abb2bf",
+            "#5c6370", "#e06c75", "#98c379", "#e5c07b",
+            "#61afef", "#c678dd", "#56b6c2", "#ffffff",
+        ]
+        return sys_colours[n]
+    if n < 232:
+        # 6x6x6 colour cube
+        n -= 16
+        b = n % 6;  n //= 6
+        g = n % 6;  r = n // 6
+        def v(x: int) -> int: return 0 if x == 0 else 55 + x * 40
+        return f"#{v(r):02x}{v(g):02x}{v(b):02x}"
+    # Greyscale ramp
+    grey = 8 + (n - 232) * 10
+    return f"#{grey:02x}{grey:02x}{grey:02x}"
 
 
 class TerminalWidget(QWidget):
@@ -216,56 +250,139 @@ class _TerminalEdit(QPlainTextEdit):
         self._fmt.setBackground(QColor(_DEFAULT_BG))
 
     def append_text(self, text: str) -> None:
-        """Append plain text (no colour parsing)."""
-        cursor = self.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText(text)
-        self.setTextCursor(cursor)
-        self.ensureCursorVisible()
+        """Append plain text (ANSI-aware fallback — routes through append_ansi)."""
+        self.append_ansi(text)
 
     def append_ansi(self, text: str) -> None:
-        """Append text, rendering ANSI SGR colour codes via QTextCharFormat."""
-        # Drop unhandled escape sequences first
-        text = _OTHER_ESC_RE.sub("", text)
+        """
+        Append text to the terminal, correctly handling ANSI escape sequences.
+
+        Every escape sequence is matched by _ESC_RE.  Only SGR (colour) and
+        ED/EL (erase) codes produce visible effects; everything else is silently
+        consumed.  Plain-text segments are cleaned of control characters before
+        insertion so no cube glyphs appear.
+        """
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
         pos = 0
-        for m in _SGR_RE.finditer(text):
-            # Insert plain segment before this escape
+        for m in _ESC_RE.finditer(text):
+            # -- plain text segment before this escape --
             if m.start() > pos:
-                cursor.insertText(text[pos:m.start()], self._fmt)
-            # Process SGR params
-            params = [int(p) if p else 0 for p in m.group(1).split(";")]
-            i = 0
-            while i < len(params):
-                p = params[i]
-                if p == 0:
-                    self._fmt = QTextCharFormat()
-                    self._fmt.setForeground(QColor(_DEFAULT_FG))
-                    self._fmt.setBackground(QColor(_DEFAULT_BG))
-                elif p == 1:
-                    self._fmt.setFontWeight(700)
-                elif p == 22:
-                    self._fmt.setFontWeight(400)
-                elif p in _ANSI_FG:
-                    self._fmt.setForeground(QColor(_ANSI_FG[p]))
-                elif p in _ANSI_BG:
-                    self._fmt.setBackground(QColor(_ANSI_BG[p]))
-                elif p == 38 and i + 2 < len(params) and params[i+1] == 5:
-                    # 256-colour FG (simplified: map to hex via xterm palette)
-                    i += 2
-                elif p == 48 and i + 2 < len(params) and params[i+1] == 5:
-                    i += 2
-                i += 1
+                self._insert_plain(cursor, text[pos:m.start()])
+
+            csi_params = m.group(1)   # may be '' or None
+            csi_final  = m.group(2)   # e.g. 'm', 'J', 'K', 'A' …
+
+            if csi_final is not None:
+                # ---- CSI sequence ----
+                if csi_final == 'm':
+                    # SGR — apply colour / style
+                    raw = csi_params or '0'
+                    params = [int(p) if p else 0 for p in raw.split(';')]
+                    self._apply_sgr(params, cursor)
+
+                elif csi_final == 'J':
+                    # Erase in display
+                    n = int(csi_params) if csi_params and csi_params.isdigit() else 0
+                    if n in (2, 3):
+                        # \x1b[2J or \x1b[3J — clear entire screen
+                        self.clear()
+                        cursor = self.textCursor()
+
+                elif csi_final == 'K':
+                    # Erase in line — best we can do is nothing (no 2D buffer)
+                    pass
+                # All other CSI sequences (cursor movement etc.) — ignore
+
+            # OSC (group 3) and two-char Esc+X (group 4) — ignore
+
             pos = m.end()
 
-        # Insert remaining text
+        # -- trailing plain text --
         if pos < len(text):
-            cursor.insertText(text[pos:], self._fmt)
+            self._insert_plain(cursor, text[pos:])
 
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _insert_plain(self, cursor: QTextCursor, text: str) -> None:
+        """
+        Insert a plain-text chunk, handling line endings and backspace.
+        \r\n  →  \n      (Windows line endings)
+        \r    →  \n      (lone carriage return — move to new line)
+        \x08  →  delete previous character (terminal backspace-erase)
+        everything else below 0x20 and 0x7f → stripped
+        """
+        # Normalise line endings FIRST so we don't double-process \r\n
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+        # Split on backspace characters and handle each piece
+        pieces = text.split('\x08')
+        for idx, piece in enumerate(pieces):
+            piece = _CTRL_RE.sub('', piece)   # strip remaining control chars
+            if idx > 0:
+                # A \x08 preceded this piece — delete the char before cursor
+                cursor.deletePreviousChar()
+            if piece:
+                cursor.insertText(piece, self._fmt)
+
+    def _apply_sgr(self, params: list[int], cursor: QTextCursor) -> None:
+        """Update self._fmt based on a list of SGR parameter integers."""
+        i = 0
+        while i < len(params):
+            p = params[i]
+            if p == 0:
+                self._fmt = QTextCharFormat()
+                self._fmt.setForeground(QColor(_DEFAULT_FG))
+                self._fmt.setBackground(QColor(_DEFAULT_BG))
+            elif p == 1:
+                self._fmt.setFontWeight(700)
+            elif p == 2:
+                self._fmt.setFontWeight(300)   # dim
+            elif p == 22:
+                self._fmt.setFontWeight(400)
+            elif p == 3:
+                self._fmt.setFontItalic(True)
+            elif p == 23:
+                self._fmt.setFontItalic(False)
+            elif p == 4:
+                self._fmt.setFontUnderline(True)
+            elif p == 24:
+                self._fmt.setFontUnderline(False)
+            elif p in _ANSI_FG:
+                self._fmt.setForeground(QColor(_ANSI_FG[p]))
+            elif p == 39:
+                self._fmt.setForeground(QColor(_DEFAULT_FG))
+            elif p in _ANSI_BG:
+                self._fmt.setBackground(QColor(_ANSI_BG[p]))
+            elif p == 49:
+                self._fmt.setBackground(QColor(_DEFAULT_BG))
+            elif p == 38 and i + 2 < len(params) and params[i + 1] == 5:
+                # 256-colour FG: ESC[38;5;Nm
+                idx_256 = params[i + 2]
+                self._fmt.setForeground(QColor(_xterm256(idx_256)))
+                i += 2
+            elif p == 48 and i + 2 < len(params) and params[i + 1] == 5:
+                # 256-colour BG: ESC[48;5;Nm
+                idx_256 = params[i + 2]
+                self._fmt.setBackground(QColor(_xterm256(idx_256)))
+                i += 2
+            elif p == 38 and i + 4 < len(params) and params[i + 1] == 2:
+                # True-colour FG: ESC[38;2;R;G;Bm
+                r, g, b = params[i + 2], params[i + 3], params[i + 4]
+                self._fmt.setForeground(QColor(r, g, b))
+                i += 4
+            elif p == 48 and i + 4 < len(params) and params[i + 1] == 2:
+                # True-colour BG: ESC[48;2;R;G;Bm
+                r, g, b = params[i + 2], params[i + 3], params[i + 4]
+                self._fmt.setBackground(QColor(r, g, b))
+                i += 4
+            i += 1
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
