@@ -277,10 +277,15 @@ class _TerminalEdit(QPlainTextEdit):
             if csi_final is not None:
                 # ---- CSI sequence ----
                 if csi_final == 'm':
-                    # SGR — apply colour / style
                     raw = csi_params or '0'
-                    params = [int(p) if p else 0 for p in raw.split(';')]
-                    self._apply_sgr(params, cursor)
+                    # DEC private sequences use '?' prefix (e.g. \x1b[?4m).
+                    # They are not SGR — skip them entirely.
+                    if '?' not in raw:
+                        try:
+                            params = [int(p) if p else 0 for p in raw.split(';')]
+                            self._apply_sgr(params, cursor)
+                        except ValueError:
+                            pass  # malformed SGR — ignore silently
 
                 elif csi_final == 'J':
                     # Erase in display
