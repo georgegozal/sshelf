@@ -1,4 +1,4 @@
-"""Embedded SSH terminal widget."""
+"""Embedded SSH terminal widget with basic ANSI colour rendering."""
 
 from __future__ import annotations
 
@@ -10,8 +10,27 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from src.models.connection import Connection
 from src.protocols.ssh import SSHWorker
 
-# Regex to strip ANSI escape sequences for the basic renderer
-_ANSI_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+# Match a single CSI SGR sequence: ESC [ <params> m
+_SGR_RE = re.compile(r'\x1b\[([0-9;]*)m')
+# Strip all other escape sequences we don't handle
+_OTHER_ESC_RE = re.compile(r'\x1b(?:[^m\[]|\[[^m]*[^m]|\[[^m]*(?=\Z))')
+
+# ANSI 3-bit colour table (indices 30-37 / 40-47)
+_ANSI_FG = {
+    30: "#1e1e1e", 31: "#e06c75", 32: "#98c379", 33: "#e5c07b",
+    34: "#61afef", 35: "#c678dd", 36: "#56b6c2", 37: "#abb2bf",
+    # bright 90-97
+    90: "#5c6370", 91: "#e06c75", 92: "#98c379", 93: "#e5c07b",
+    94: "#61afef", 95: "#c678dd", 96: "#56b6c2", 97: "#ffffff",
+}
+_ANSI_BG = {
+    40: "#1e1e1e", 41: "#e06c75", 42: "#98c379", 43: "#e5c07b",
+    44: "#61afef", 45: "#c678dd", 46: "#56b6c2", 47: "#abb2bf",
+    100: "#5c6370", 101: "#e06c75", 102: "#98c379", 103: "#e5c07b",
+    104: "#61afef", 105: "#c678dd", 106: "#56b6c2", 107: "#ffffff",
+}
+_DEFAULT_FG = "#d4d4d4"
+_DEFAULT_BG = "#1e1e1e"
 
 
 class TerminalWidget(QWidget):
@@ -114,8 +133,7 @@ class TerminalWidget(QWidget):
 
     def _on_data(self, raw: bytes) -> None:
         text = raw.decode("utf-8", errors="replace")
-        text = _ANSI_RE.sub("", text)
-        self._output.append_text(text)
+        self._output.append_ansi(text)
 
     def _on_error(self, msg: str) -> None:
         self._set_status(f"Error: {msg}")
@@ -192,11 +210,60 @@ class _TerminalEdit(QPlainTextEdit):
         self.setStyleSheet("border: none; padding: 6px;")
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
+        # Current character format (updated by SGR codes)
+        self._fmt = QTextCharFormat()
+        self._fmt.setForeground(QColor(_DEFAULT_FG))
+        self._fmt.setBackground(QColor(_DEFAULT_BG))
+
     def append_text(self, text: str) -> None:
-        """Append text without adding an extra newline (unlike appendPlainText)."""
+        """Append plain text (no colour parsing)."""
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         cursor.insertText(text)
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+
+    def append_ansi(self, text: str) -> None:
+        """Append text, rendering ANSI SGR colour codes via QTextCharFormat."""
+        # Drop unhandled escape sequences first
+        text = _OTHER_ESC_RE.sub("", text)
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        pos = 0
+        for m in _SGR_RE.finditer(text):
+            # Insert plain segment before this escape
+            if m.start() > pos:
+                cursor.insertText(text[pos:m.start()], self._fmt)
+            # Process SGR params
+            params = [int(p) if p else 0 for p in m.group(1).split(";")]
+            i = 0
+            while i < len(params):
+                p = params[i]
+                if p == 0:
+                    self._fmt = QTextCharFormat()
+                    self._fmt.setForeground(QColor(_DEFAULT_FG))
+                    self._fmt.setBackground(QColor(_DEFAULT_BG))
+                elif p == 1:
+                    self._fmt.setFontWeight(700)
+                elif p == 22:
+                    self._fmt.setFontWeight(400)
+                elif p in _ANSI_FG:
+                    self._fmt.setForeground(QColor(_ANSI_FG[p]))
+                elif p in _ANSI_BG:
+                    self._fmt.setBackground(QColor(_ANSI_BG[p]))
+                elif p == 38 and i + 2 < len(params) and params[i+1] == 5:
+                    # 256-colour FG (simplified: map to hex via xterm palette)
+                    i += 2
+                elif p == 48 and i + 2 < len(params) and params[i+1] == 5:
+                    i += 2
+                i += 1
+            pos = m.end()
+
+        # Insert remaining text
+        if pos < len(text):
+            cursor.insertText(text[pos:], self._fmt)
+
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
 
