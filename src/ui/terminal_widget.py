@@ -452,7 +452,7 @@ class _PyteTerminal(QPlainTextEdit):
         )
         cur.removeSelectedText()
 
-        for y in range(cy + 1):
+        for y in range(self.screen.lines):
             if y > 0 or self._rendered_history > 0 or doc.blockCount() > 1:
                 cur.insertBlock()
             self._render_row(cur, self.screen.buffer[y], cx if y == cy else -1)
@@ -460,7 +460,12 @@ class _PyteTerminal(QPlainTextEdit):
         cur.endEditBlock()
 
         if at_bottom:
-            vbar.setValue(vbar.maximum())
+            lines_below = self.screen.lines - 1 - cy
+            if lines_below > 0:
+                line_h = QFontMetrics(self.font()).lineSpacing()
+                vbar.setValue(max(0, vbar.maximum() - lines_below * line_h))
+            else:
+                vbar.setValue(vbar.maximum())
 
     def _render_row(
         self,
