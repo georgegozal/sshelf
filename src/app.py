@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QStyleFactory
 from PyQt6.QtGui import QFont, QPalette, QColor
 from PyQt6.QtCore import Qt
 
@@ -29,11 +29,53 @@ class Application(QApplication):
 
         self._launch_main_window()
 
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def apply_theme(theme: str) -> None:
+        """Apply 'dark', 'light', or 'system' theme to the running app."""
+        app = QApplication.instance()
+
+        if theme == "dark":
+            app.setStyle("Fusion")
+            p = QPalette()
+            p.setColor(QPalette.ColorRole.Window,          QColor(45, 45, 45))
+            p.setColor(QPalette.ColorRole.WindowText,      QColor(220, 220, 220))
+            p.setColor(QPalette.ColorRole.Base,            QColor(30, 30, 30))
+            p.setColor(QPalette.ColorRole.AlternateBase,   QColor(40, 40, 40))
+            p.setColor(QPalette.ColorRole.Text,            QColor(220, 220, 220))
+            p.setColor(QPalette.ColorRole.Button,          QColor(55, 55, 55))
+            p.setColor(QPalette.ColorRole.ButtonText,      QColor(220, 220, 220))
+            p.setColor(QPalette.ColorRole.Highlight,       QColor(42, 130, 218))
+            p.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+            p.setColor(QPalette.ColorRole.Link,            QColor(42, 130, 218))
+            p.setColor(QPalette.ColorRole.BrightText,      QColor(255, 255, 255))
+            p.setColor(QPalette.ColorRole.ToolTipBase,     QColor(55, 55, 55))
+            p.setColor(QPalette.ColorRole.ToolTipText,     QColor(220, 220, 220))
+            for role in (QPalette.ColorRole.WindowText,
+                         QPalette.ColorRole.Text,
+                         QPalette.ColorRole.ButtonText):
+                p.setColor(QPalette.ColorGroup.Disabled, role, QColor(128, 128, 128))
+            app.setPalette(p)
+
+        elif theme == "light":
+            app.setStyle("Fusion")
+            app.setPalette(QPalette())
+
+        else:  # "system"
+            available = [k.lower() for k in QStyleFactory.keys()]
+            if "macos" in available:
+                app.setStyle("macOS")
+            app.setPalette(QPalette())
+
     def _launch_main_window(self) -> None:
         from src.ui.main_window import MainWindow
         from src.storage.database import Database
 
         self._db = Database()
+        self.apply_theme(self._db.get_pref("app_theme", "system"))
         self._main_window = MainWindow(self._db)
         self._main_window.show()
 

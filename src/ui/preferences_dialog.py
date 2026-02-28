@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from src.storage.database import Database
+from src.app import Application
 
 
 class PreferencesDialog(QDialog):
@@ -43,6 +44,12 @@ class PreferencesDialog(QDialog):
         self._confirm_delete.setChecked(db.get_pref("confirm_delete", "1") == "1")
         form.addRow("Confirm before delete:", self._confirm_delete)
 
+        self._theme = QComboBox()
+        self._theme.addItems(["System", "Light", "Dark"])
+        saved = db.get_pref("app_theme", "system")
+        self._theme.setCurrentIndex({"system": 0, "light": 1, "dark": 2}.get(saved, 0))
+        form.addRow("Theme:", self._theme)
+
         layout.addLayout(form)
 
         btns = QDialogButtonBox(
@@ -57,4 +64,7 @@ class PreferencesDialog(QDialog):
         self.db.set_pref("terminal_font_size", str(self._font_size.value()))
         self.db.set_pref("default_keep_alive", str(self._keep_alive.value()))
         self.db.set_pref("confirm_delete", "1" if self._confirm_delete.isChecked() else "0")
+        theme = ["system", "light", "dark"][self._theme.currentIndex()]
+        self.db.set_pref("app_theme", theme)
+        Application.apply_theme(theme)
         self.accept()
