@@ -3,18 +3,27 @@ Embedded SSH terminal widget backed by a pyte VT100 screen buffer.
 
 Architecture
 ------------
-  Raw bytes (SSH) ──► pyte.ByteStream ──► pyte.HistoryScreen
-                                                  │
-                             QTimer (16 ms) ──────┘ triggers _render()
-                                                  │
-                         _PyteTerminal (QPlainTextEdit) ◄── draws screen
+  Raw bytes (SSH) ──► pyte.ByteStream ──► _Screen (pyte.HistoryScreen)
+                                                 │
+                          QTimer (16 ms) ─────────┘ triggers _render()
+                                                 │
+                      _PyteTerminal (QPlainTextEdit) ◄── draws screen
+
+Alt-screen mode (vim, htop, …)
+  - Detected via DECSET/DECRST 1049 → _Screen.in_alt_screen flag.
+  - _render() does a clean full-redraw of the 50-line live buffer only;
+    no history rows are touched, so vim can never "stack" frames.
+
+Normal mode
+  - History rows appended once (never redrawn).
+  - Live screen section replaced on every frame.
 """
 
 from __future__ import annotations
 
 import pyte
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QKeyEvent, QPalette, QTextCharFormat, QTextCursor
+from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QKeyEvent, QPalette, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
 )
@@ -22,12 +31,12 @@ from PyQt6.QtWidgets import (
 from src.models.connection import Connection
 from src.protocols.ssh import SSHWorker
 
-# ── Terminal dimensions (must match what SSHWorker requests from paramiko) ──
-_PTY_COLS = 200
-_PTY_ROWS = 50
-_HISTORY  = 2000   # scrollback lines kept in pyte
+# ── Terminal dimensions ──────────────────────────────────────────────────────
+_PTY_COLS_DEFAULT = 220
+_PTY_ROWS_DEFAULT = 50
+_HISTORY          = 2000   # scrollback lines kept in pyte
 
-# ── Colour defaults (One Dark) ──────────────────────────────────────────────
+# ── Colour defaults (One Dark) ───────────────────────────────────────────────
 _DEFAULT_FG = "#d4d4d4"
 _DEFAULT_BG = "#1e1e1e"
 _CURSOR_BG  = "#528bff"
@@ -45,34 +54,17 @@ _NAMED: dict[str, str] = {
 }
 
 
-# ── Colour helpers ───────────────────────────────────────────────────────────
-
-class _Screen(pyte.HistoryScreen):
-    """
-    Thin subclass of HistoryScreen that works around a pyte bug:
-    pyte's stream dispatcher calls  select_graphic_rendition(*params, private=True)
-    for DEC private CSI sequences that happen to end in 'm', but pyte's own
-    Screen.select_graphic_rendition() does not accept the 'private' keyword —
-    causing a TypeError crash when programs like vim emit e.g. \x1b[?1m.
-    We accept (and ignore) the private flag here.
-    """
-
-    def select_graphic_rendition(self, *attrs: int, private: bool = False) -> None:
-        if not private:
-            super().select_graphic_rendition(*attrs)
-        # private=True → DEC private SGR variant; not a standard colour code, skip.
-
+# ── Colour helpers ────────────────────────────────────────────────────────────
 
 def _pyte_color(value: object, is_fg: bool) -> str:
     """Convert a pyte colour value (string, int, tuple) to #RRGGBB."""
     if not value or value == "default":
         return _DEFAULT_FG if is_fg else _DEFAULT_BG
-    if isinstance(value, int):          # 256-colour index
+    if isinstance(value, int):
         return _xterm256(value)
-    if isinstance(value, (tuple, list)) and len(value) == 3:  # truecolour
+    if isinstance(value, (tuple, list)) and len(value) == 3:
         return "#{:02x}{:02x}{:02x}".format(int(value[0]), int(value[1]), int(value[2]))
     if isinstance(value, str):
-        # pyte stores 256/TC colours as 6-char hex without '#'
         if len(value) == 6 and all(c in "0123456789abcdefABCDEF" for c in value):
             return f"#{value}"
         return _NAMED.get(value, _DEFAULT_FG if is_fg else _DEFAULT_BG)
@@ -82,8 +74,7 @@ def _pyte_color(value: object, is_fg: bool) -> str:
 def _xterm256(n: int) -> str:
     """xterm 256-colour index → #RRGGBB."""
     if n < 16:
-        vals = list(_NAMED.values())
-        return vals[n % 16]
+        return list(_NAMED.values())[n % 16]
     if n < 232:
         n -= 16
         b = n % 6; n //= 6
@@ -94,7 +85,48 @@ def _xterm256(n: int) -> str:
     return f"#{grey:02x}{grey:02x}{grey:02x}"
 
 
-# ── Main widget ──────────────────────────────────────────────────────────────
+# ── Patched pyte screen ───────────────────────────────────────────────────────
+
+class _Screen(pyte.HistoryScreen):
+    """
+    Extends HistoryScreen with two fixes:
+
+    1.  select_graphic_rendition(*attrs, private=False)
+        pyte's stream dispatcher calls this with private=True for DEC private
+        CSI sequences ending in 'm' (e.g. \x1b[?1m).  pyte's own Screen does
+        not accept that keyword → TypeError crash.  We accept and ignore it.
+
+    2.  in_alt_screen flag
+        We intercept set_mode / reset_mode for private mode 1049
+        (the "save cursor + switch to alternate screen" sequence used by vim,
+        htop, less, etc.) and expose a plain boolean.  The renderer uses this
+        to skip history and do a clean full-redraw instead.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.in_alt_screen: bool = False
+
+    # ── Fix 1: accept private kwarg on SGR ───────────────────────────────────
+
+    def select_graphic_rendition(self, *attrs: int, private: bool = False) -> None:
+        if not private:
+            super().select_graphic_rendition(*attrs)
+
+    # ── Fix 2: track alternate-screen mode ───────────────────────────────────
+
+    def set_mode(self, *modes: int, private: bool = False) -> None:
+        super().set_mode(*modes, private=private)
+        if private and 1049 in modes:
+            self.in_alt_screen = True
+
+    def reset_mode(self, *modes: int, private: bool = False) -> None:
+        super().reset_mode(*modes, private=private)
+        if private and 1049 in modes:
+            self.in_alt_screen = False
+
+
+# ── Main widget ───────────────────────────────────────────────────────────────
 
 class TerminalWidget(QWidget):
     """
@@ -112,7 +144,7 @@ class TerminalWidget(QWidget):
         self._worker: SSHWorker | None = None
         self._build_ui()
 
-    # ── UI ──────────────────────────────────────────────────────────────────
+    # ── UI ───────────────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -141,6 +173,7 @@ class TerminalWidget(QWidget):
         # Terminal area
         self._output = _PyteTerminal(self)
         self._output.key_pressed.connect(self._on_key)
+        self._output.resize_pty.connect(self._on_resize_pty)
         layout.addWidget(self._output)
 
         # Status bar
@@ -193,11 +226,15 @@ class TerminalWidget(QWidget):
             self._thread.quit()
         self.disconnected.emit("Session closed.")
 
-    # ── Key forwarding ───────────────────────────────────────────────────────
+    # ── Key / resize forwarding ──────────────────────────────────────────────
 
     def _on_key(self, data: bytes) -> None:
         if self._worker:
             self._worker.send(data)
+
+    def _on_resize_pty(self, cols: int, rows: int) -> None:
+        if self._worker:
+            self._worker.resize(cols, rows)
 
     # ── Cleanup ──────────────────────────────────────────────────────────────
 
@@ -209,20 +246,35 @@ class TerminalWidget(QWidget):
         super().closeEvent(event)
 
 
-# ── pyte-backed QPlainTextEdit ───────────────────────────────────────────────
+# ── pyte-backed QPlainTextEdit ────────────────────────────────────────────────
 
 class _PyteTerminal(QPlainTextEdit):
     """
-    QPlainTextEdit driven by a pyte.HistoryScreen state machine.
+    QPlainTextEdit driven by a _Screen (pyte.HistoryScreen) state machine.
 
-    - Raw bytes feed into pyte, which handles ALL VT100/xterm sequences:
-      cursor movement, alternate screen, erase, colour, reverse video, etc.
-    - A 16 ms QTimer coalesces rapid updates into at most 60 fps redraws.
-    - History rows are appended once (never redrawn); only the live screen
-      (_PTY_ROWS lines) is re-rendered on every frame.
+    Rendering strategy
+    ------------------
+    Alt-screen mode  (vim, htop, less, …)
+        Detected via _Screen.in_alt_screen.  The entire document is cleared
+        and the 50-line live buffer is redrawn on every frame.  History rows
+        are never written, so TUI redraws can never stack.
+
+    Normal mode  (plain shell output)
+        History rows appended once and never touched again.
+        The live screen section (last _PTY_ROWS lines) is replaced each frame.
+
+    Resize
+        resizeEvent() recalculates PTY dimensions from the font metrics and
+        viewport size, resizes the pyte screen in-place, and emits resize_pty
+        so TerminalWidget can forward the new size to paramiko.
+
+    Shortcuts
+        event() intercepts Qt ShortcutOverride events for Ctrl/Meta combos so
+        they reach keyPressEvent() rather than triggering menu actions.
     """
 
     key_pressed = pyqtSignal(bytes)
+    resize_pty  = pyqtSignal(int, int)   # cols, rows
 
     # Qt key → ANSI/VT sequence
     _KEY_MAP: dict[int, bytes] = {
@@ -253,8 +305,8 @@ class _PyteTerminal(QPlainTextEdit):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        # pyte state machine with scrollback (uses patched _Screen subclass)
-        self.screen = _Screen(_PTY_COLS, _PTY_ROWS, history=_HISTORY)
+        # pyte state machine (uses patched _Screen subclass)
+        self.screen = _Screen(_PTY_COLS_DEFAULT, _PTY_ROWS_DEFAULT, history=_HISTORY)
         self.stream = pyte.ByteStream(self.screen)
 
         # Render throttle
@@ -264,7 +316,7 @@ class _PyteTerminal(QPlainTextEdit):
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._render)
 
-        # How many history rows are already in the document
+        # How many history rows are already written into the document
         self._rendered_history = 0
 
         # Widget appearance
@@ -280,7 +332,7 @@ class _PyteTerminal(QPlainTextEdit):
         self.setStyleSheet("border: none; padding: 4px;")
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
-    # ── Public API ───────────────────────────────────────────────────────────
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def feed(self, raw: bytes) -> None:
         """Feed raw bytes from the SSH channel; schedule a redraw."""
@@ -289,22 +341,76 @@ class _PyteTerminal(QPlainTextEdit):
             self._pending = True
             self._timer.start()
 
-    # ── Rendering ────────────────────────────────────────────────────────────
+    # ── PTY resize ────────────────────────────────────────────────────────────
+
+    def _sync_pty_size(self) -> None:
+        """Recalculate PTY cols/rows from font metrics and emit resize_pty."""
+        fm   = QFontMetrics(self.font())
+        char_w = fm.horizontalAdvance(" ")
+        char_h = fm.height()
+        if char_w == 0 or char_h == 0:
+            return
+
+        vp   = self.viewport()
+        cols = max(40, vp.width()  // char_w)
+        rows = max(10, vp.height() // char_h)
+
+        if cols == self.screen.columns and rows == self.screen.lines:
+            return
+
+        self.screen.resize(rows, cols)
+        self.resize_pty.emit(cols, rows)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_pty_size()
+
+    # ── Rendering ─────────────────────────────────────────────────────────────
 
     def _render(self) -> None:
         """
-        Incremental render:
-          1. Append any new scrollback rows (written once, never redrawn).
-          2. Replace the live screen section with fresh content from pyte.
+        Choose rendering strategy based on whether pyte is in alt-screen mode.
+
+        Alt-screen (vim / htop / less):
+            Clear the whole document and redraw the live 50-line screen.
+            History rows are never written, so frames can never stack.
+
+        Normal shell:
+            Append any new history rows once, then replace the live screen
+            section at the end of the document.
         """
         self._pending = False
 
         vbar      = self.verticalScrollBar()
         at_bottom = vbar.value() >= vbar.maximum() - 4
+        doc       = self.document()
 
-        doc = self.document()
+        if self.screen.in_alt_screen:
+            # ── Alt-screen: clean full redraw ─────────────────────────────
+            self._rendered_history = 0
 
-        # ── 1. New history rows ──────────────────────────────────────────
+            cx = self.screen.cursor.x
+            cy = self.screen.cursor.y
+
+            cur = QTextCursor(doc)
+            cur.select(QTextCursor.SelectionType.Document)
+            cur.beginEditBlock()
+            cur.removeSelectedText()
+
+            first = True
+            for y in range(self.screen.lines):
+                if not first:
+                    cur.insertBlock()
+                first = False
+                self._render_row(cur, self.screen.buffer[y], cx if y == cy else -1)
+
+            cur.endEditBlock()
+            # In alt screen let pyte control cursor position; don't force scroll.
+            return
+
+        # ── Normal mode: incremental history + live screen ────────────────
+
+        # 1. Append new history rows (written once, never redrawn)
         history_rows = list(self.screen.history.top)
         new_count    = len(history_rows)
 
@@ -327,7 +433,7 @@ class _PyteTerminal(QPlainTextEdit):
 
             self._rendered_history = new_count
 
-        # ── 2. Re-render live screen ─────────────────────────────────────
+        # 2. Replace the live screen section
         cx = self.screen.cursor.x
         cy = self.screen.cursor.y
 
@@ -346,7 +452,7 @@ class _PyteTerminal(QPlainTextEdit):
         )
         cur.removeSelectedText()
 
-        for y in range(self.screen.lines):
+        for y in range(cy + 1):
             if y > 0 or self._rendered_history > 0 or doc.blockCount() > 1:
                 cur.insertBlock()
             self._render_row(cur, self.screen.buffer[y], cx if y == cy else -1)
@@ -380,7 +486,7 @@ class _PyteTerminal(QPlainTextEdit):
                 x += 1
                 continue
 
-            # Start of a new run — read format from the first cell
+            # Start of a new run
             first     = row[x]
             fg        = _pyte_color(first.fg, True)
             bg        = _pyte_color(first.bg, False)
@@ -392,7 +498,6 @@ class _PyteTerminal(QPlainTextEdit):
 
             run: list[str] = []
 
-            # Extend the run while the format stays the same
             while x < cols and x != cursor_x:
                 c   = row[x]
                 cfg = _pyte_color(c.fg, True)
@@ -405,7 +510,6 @@ class _PyteTerminal(QPlainTextEdit):
                 run.append(c.data or " ")
                 x += 1
 
-            # Insert run with its format
             fmt = QTextCharFormat()
             fmt.setForeground(QColor(fg))
             fmt.setBackground(QColor(bg))
@@ -415,6 +519,16 @@ class _PyteTerminal(QPlainTextEdit):
             cursor.insertText("".join(run), fmt)
 
     # ── Keyboard handling ─────────────────────────────────────────────────────
+
+    def event(self, event: QEvent) -> bool:
+        """Intercept ShortcutOverride so Ctrl/Meta combos reach keyPressEvent."""
+        if event.type() == QEvent.Type.ShortcutOverride:
+            mods = event.modifiers()
+            if mods & (Qt.KeyboardModifier.ControlModifier |
+                       Qt.KeyboardModifier.MetaModifier):
+                event.accept()
+                return True
+        return super().event(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key  = event.key()
