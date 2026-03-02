@@ -302,7 +302,7 @@ class TerminalWidget(QWidget):
 
         # ── Content: terminal + side panel ───────────────────────────────────
         self._content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        layout.addWidget(self._content_splitter)
+        layout.addWidget(self._content_splitter, stretch=1)
 
         # Terminal
         self._output = _PyteTerminal(self)
