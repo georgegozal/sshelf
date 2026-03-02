@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from src.models.connection import Connection
+from src.storage import keychain
 
 
 # Store DB in ~/Library/Application Support/RemminaMac/
@@ -62,17 +63,37 @@ class Database:
         rows = self._conn.execute(
             "SELECT * FROM connections ORDER BY group_name, name"
         ).fetchall()
-        return [Connection.from_dict(dict(r)) for r in rows]
+        conns = [Connection.from_dict(dict(r)) for r in rows]
+        for c in conns:
+            self._fill_password(c)
+        return conns
 
     def get_connection(self, conn_id: int) -> Optional[Connection]:
         row = self._conn.execute(
             "SELECT * FROM connections WHERE id = ?", (conn_id,)
         ).fetchone()
-        return Connection.from_dict(dict(row)) if row else None
+        if not row:
+            return None
+        c = Connection.from_dict(dict(row))
+        self._fill_password(c)
+        return c
+
+    def _fill_password(self, conn: Connection) -> None:
+        """If the DB password is empty, try to load it from Keychain."""
+        if not conn.password and conn.id is not None:
+            conn.password = keychain.retrieve(conn.id)
 
     def save_connection(self, conn: Connection) -> Connection:
-        """Insert or update a connection. Returns the connection with its id set."""
+        """Insert or update a connection. Returns the connection with its id set.
+
+        Passwords are stored in the macOS Keychain when available; the DB
+        column is kept empty so credentials never sit in plaintext on disk.
+        """
+        password = conn.password  # keep in memory; don't write to DB
+
         d = conn.to_dict()
+        d["password"] = ""  # always blank in SQLite
+
         if conn.id is None:
             cur = self._conn.execute(
                 """INSERT INTO connections
@@ -102,11 +123,18 @@ class Database:
                 d,
             )
         self._conn.commit()
+
+        # Persist the password in Keychain (after we have a valid id)
+        if password and conn.id is not None:
+            keychain.store(conn.id, password)
+            conn.password = password  # restore on the in-memory object
+
         return conn
 
     def delete_connection(self, conn_id: int) -> None:
         self._conn.execute("DELETE FROM connections WHERE id = ?", (conn_id,))
         self._conn.commit()
+        keychain.delete(conn_id)
 
     def groups(self) -> List[str]:
         """Return distinct group names, sorted."""
