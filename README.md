@@ -2,6 +2,8 @@
 
 A Remmina-inspired SSH connection manager for macOS, built with Python and PyQt6.
 
+![RemminaMac screenshot](assets/screenshot.png)
+
 ## Features
 
 ### Connection management
