@@ -27,8 +27,8 @@ class WelcomeWidget(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         subtitle = QLabel(
-            "Select a saved connection to view details,\n"
-            "or double-click to open a terminal.\n\n"
+            "Single-click a connection to view details and connect,\n"
+            "or double-click to open a terminal directly.\n\n"
             "Use ＋ New in the toolbar to add your first server."
         )
         subtitle.setStyleSheet("color: palette(mid); font-size: 14px;")
@@ -103,17 +103,20 @@ class DetailWidget(QWidget):
 
         layout.addWidget(card)
 
-        # Connect button
-        btn = QPushButton("⚡  Connect")
-        btn.setFixedHeight(40)
+        # Connect button — full width, prominent
+        btn = QPushButton("⚡   Connect")
+        btn.setFixedHeight(48)
         btn.setStyleSheet(
-            "QPushButton { font-size: 15px; background: #2563eb; color: white;"
-            " border-radius: 6px; }"
+            "QPushButton { font-size: 16px; font-weight: bold;"
+            " background: #2563eb; color: white;"
+            " border-radius: 8px; border: none; }"
             "QPushButton:hover { background: #1d4ed8; }"
+            "QPushButton:pressed { background: #1e40af; }"
         )
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.clicked.connect(self._on_connect)
-        layout.addWidget(btn)
         layout.addStretch()
+        layout.addWidget(btn)
 
     def _on_connect(self) -> None:
         win = self.window()
