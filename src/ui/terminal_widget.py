@@ -238,11 +238,16 @@ class TerminalWidget(QWidget):
 
     # ── Cleanup ──────────────────────────────────────────────────────────────
 
-    def closeEvent(self, event) -> None:
-        self._on_disconnect()
+    def shutdown(self) -> None:
+        """Gracefully stop the SSH session and worker thread."""
+        if self._worker:
+            self._worker.disconnect()
         if self._thread:
             self._thread.quit()
             self._thread.wait(2000)
+
+    def closeEvent(self, event) -> None:
+        self.shutdown()
         super().closeEvent(event)
 
 

@@ -218,6 +218,9 @@ class MainWindow(QMainWindow):
             return
         sizes = self._splitter.sizes()
         if old is not None:
+            from src.ui.terminal_widget import TerminalWidget
+            if isinstance(old, TerminalWidget):
+                old.shutdown()
             old.setParent(None)  # type: ignore[arg-type]
             old.deleteLater()
         self._splitter.addWidget(widget)
