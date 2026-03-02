@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout, QToolBar,
     QStatusBar, QMenuBar, QMenu, QMessageBox, QApplication,
     QLineEdit, QLabel, QComboBox, QPushButton, QHBoxLayout,
-    QSizePolicy,
+    QSizePolicy, QTabWidget, QTabBar,
 )
 from PyQt6.QtGui import QAction, QKeySequence, QFont, QIcon
 from PyQt6.QtCore import Qt, QSize
@@ -164,7 +164,7 @@ class MainWindow(QMainWindow):
         tb.addWidget(self._search_box)
 
     # ------------------------------------------------------------------
-    # Central widget (splitter)
+    # Central widget (splitter + tab panel)
     # ------------------------------------------------------------------
 
     def _build_central(self) -> None:
@@ -180,14 +180,20 @@ class MainWindow(QMainWindow):
         self._tree.setMinimumWidth(220)
         self._splitter.addWidget(self._tree)
 
-        # Right panel: starts as welcome screen
-        self._welcome = WelcomeWidget(self)
-        self._right_widget: QWidget = self._welcome
-        self._splitter.addWidget(self._right_widget)
+        # Right panel: tab widget (home tab + terminal tabs)
+        self._tabs = QTabWidget()
+        self._tabs.setTabsClosable(True)
+        self._tabs.setMovable(True)
+        self._tabs.tabCloseRequested.connect(self._on_tab_close_requested)
+        self._splitter.addWidget(self._tabs)
 
         self._splitter.setSizes([260, 940])
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
+
+        # Permanent home tab at index 0 — no close button
+        self._tabs.addTab(WelcomeWidget(self), "Home")
+        self._tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
 
         # Wire tree signals
         self._tree.connection_selected.connect(self._on_connection_selected)
@@ -208,40 +214,60 @@ class MainWindow(QMainWindow):
         self._status_label.setText(msg)
 
     # ------------------------------------------------------------------
-    # Right-panel management
+    # Tab management
     # ------------------------------------------------------------------
 
-    def _replace_right(self, widget: QWidget) -> None:
-        """Swap the right panel widget."""
-        old = self._splitter.widget(1)
-        if old is widget:
-            return
-        sizes = self._splitter.sizes()
-        if old is not None:
-            from src.ui.terminal_widget import TerminalWidget
-            if isinstance(old, TerminalWidget):
-                old.shutdown()
-            old.setParent(None)  # type: ignore[arg-type]
+    def _update_home_tab(self, widget: QWidget, label: str = "Home") -> None:
+        """Replace the home tab content without touching terminal tabs."""
+        was_current = self._tabs.currentIndex() == 0
+        old = self._tabs.widget(0)
+        self._tabs.removeTab(0)
+        if old:
             old.deleteLater()
-        self._splitter.addWidget(widget)
-        self._splitter.setSizes(sizes)
-        self._right_widget = widget
+        self._tabs.insertTab(0, widget, label)
+        self._tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
+        if was_current:
+            self._tabs.setCurrentIndex(0)
 
-    def _show_terminal(self, conn: Connection) -> None:
+    def _open_terminal(self, conn: Connection) -> None:
+        """Open a new terminal tab for conn; switch to existing tab if already open."""
         from src.ui.terminal_widget import TerminalWidget
+
+        # If a tab for this connection is already open, just switch to it
+        if conn.id is not None:
+            for i in range(1, self._tabs.count()):
+                w = self._tabs.widget(i)
+                if isinstance(w, TerminalWidget) and getattr(w._conn, "id", None) == conn.id:
+                    self._tabs.setCurrentIndex(i)
+                    return
+
         terminal = TerminalWidget(conn, self)
         terminal.status_message.connect(self.set_status)
-        terminal.disconnected.connect(lambda msg: self.set_status(msg))
-        self._replace_right(terminal)
+        terminal.disconnected.connect(
+            lambda msg, t=terminal: self._on_terminal_disconnected(t, msg)
+        )
+        idx = self._tabs.addTab(terminal, f"🔑 {conn.display_name()}")
+        self._tabs.setCurrentIndex(idx)
         terminal.start_connection()
+        self.set_status(f"Connecting to {conn.connection_string()}…")
 
-    def _show_welcome(self) -> None:
-        from src.ui.welcome_widget import WelcomeWidget
-        self._replace_right(WelcomeWidget(self))
+    def _on_terminal_disconnected(self, terminal, msg: str) -> None:
+        """Update the tab title when a session ends; keep the tab open."""
+        self.set_status(msg)
+        idx = self._tabs.indexOf(terminal)
+        if idx >= 0:
+            self._tabs.setTabText(idx, f"✕ {terminal._conn.display_name()}")
 
-    def _show_detail(self, conn: Connection) -> None:
-        from src.ui.welcome_widget import DetailWidget
-        self._replace_right(DetailWidget(conn, self))
+    def _on_tab_close_requested(self, index: int) -> None:
+        if index == 0:
+            return  # home tab is permanent
+        from src.ui.terminal_widget import TerminalWidget
+        widget = self._tabs.widget(index)
+        if isinstance(widget, TerminalWidget):
+            widget.shutdown()
+        self._tabs.removeTab(index)
+        if widget:
+            widget.deleteLater()
 
     # ------------------------------------------------------------------
     # Slot: tree signals
@@ -252,19 +278,20 @@ class MainWindow(QMainWindow):
         self._act_del_conn.setEnabled(True)
         self._btn_edit.setEnabled(True)
         self._btn_del.setEnabled(True)
-        self._show_detail(conn)
+        from src.ui.welcome_widget import DetailWidget
+        self._update_home_tab(DetailWidget(conn, self), f"📋 {conn.display_name()}")
 
     def _on_connection_activated(self, conn: Connection) -> None:
-        """Double-click or Enter — open a terminal."""
-        self._show_terminal(conn)
-        self.set_status(f"Connecting to {conn.connection_string()}…")
+        """Double-click or Enter — open a terminal tab."""
+        self._open_terminal(conn)
 
     def _on_selection_cleared(self) -> None:
         self._act_edit_conn.setEnabled(False)
         self._act_del_conn.setEnabled(False)
         self._btn_edit.setEnabled(False)
         self._btn_del.setEnabled(False)
-        self._show_welcome()
+        from src.ui.welcome_widget import WelcomeWidget
+        self._update_home_tab(WelcomeWidget(self), "Home")
 
     # ------------------------------------------------------------------
     # Slot: toolbar / menu actions
@@ -285,7 +312,8 @@ class MainWindow(QMainWindow):
         dlg = ConnectionDialog(self.db, connection=conn, parent=self)
         if dlg.exec():
             self._tree.reload()
-            self._show_detail(dlg.saved_connection)
+            from src.ui.welcome_widget import DetailWidget
+            self._update_home_tab(DetailWidget(dlg.saved_connection, self), f"📋 {dlg.saved_connection.display_name()}")
             self.set_status(f"Connection '{dlg.saved_connection.display_name()}' updated.")
 
     def _on_delete_connection(self) -> None:
@@ -300,7 +328,6 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.Yes:
             self.db.delete_connection(conn.id)
             self._tree.reload()
-            self._show_welcome()
             self._on_selection_cleared()
             self.set_status(f"Connection '{conn.display_name()}' deleted.")
 
@@ -310,8 +337,7 @@ class MainWindow(QMainWindow):
             self._qc_host.setFocus()
             return
         conn = self._parse_quick_connect(text)
-        self._show_terminal(conn)
-        self.set_status(f"Quick connecting to {conn.connection_string()}…")
+        self._open_terminal(conn)
 
     @staticmethod
     def _parse_quick_connect(text: str) -> Connection:
@@ -362,5 +388,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event) -> None:
+        from src.ui.terminal_widget import TerminalWidget
+        for i in range(1, self._tabs.count()):
+            w = self._tabs.widget(i)
+            if isinstance(w, TerminalWidget):
+                w.shutdown()
         self.db.set_pref("window_geometry", self.saveGeometry().toHex().data().decode())
         super().closeEvent(event)
