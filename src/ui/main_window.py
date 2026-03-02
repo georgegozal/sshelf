@@ -252,11 +252,13 @@ class MainWindow(QMainWindow):
         self.set_status(f"Connecting to {conn.connection_string()}…")
 
     def _on_terminal_disconnected(self, terminal, msg: str) -> None:
-        """Update the tab title when a session ends; keep the tab open."""
+        """Close the tab automatically when a session ends."""
         self.set_status(msg)
         idx = self._tabs.indexOf(terminal)
         if idx >= 0:
-            self._tabs.setTabText(idx, f"✕ {terminal._conn.display_name()}")
+            self._tabs.removeTab(idx)
+            terminal.shutdown()
+            terminal.deleteLater()
 
     def _on_tab_close_requested(self, index: int) -> None:
         if index == 0:
