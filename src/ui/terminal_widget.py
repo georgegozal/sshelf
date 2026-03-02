@@ -915,7 +915,15 @@ class _PyteTerminal(QPlainTextEdit):
     # ── Keyboard handling ─────────────────────────────────────────────────────
 
     def event(self, event: QEvent) -> bool:
-        """Intercept ShortcutOverride so Ctrl/Meta combos reach keyPressEvent."""
+        """
+        Intercept keys that Qt would otherwise steal before keyPressEvent:
+        - ShortcutOverride for Ctrl/Meta combos
+        - Tab / Shift+Tab (Qt uses these for focus chain navigation)
+        """
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+                self.keyPressEvent(event)
+                return True
         if event.type() == QEvent.Type.ShortcutOverride:
             mods = event.modifiers()
             if mods & (Qt.KeyboardModifier.ControlModifier |
@@ -980,7 +988,14 @@ class _PyteTerminal(QPlainTextEdit):
             self.key_pressed.emit(b"\x7f")
             return
         if key == Qt.Key.Key_Tab:
-            self.key_pressed.emit(b"\t")
+            # Shift+Tab = reverse tab (CSI Z), plain Tab = \t (autocomplete)
+            if shift:
+                self.key_pressed.emit(b"\x1b[Z")
+            else:
+                self.key_pressed.emit(b"\t")
+            return
+        if key == Qt.Key.Key_Backtab:   # Qt alias for Shift+Tab on some platforms
+            self.key_pressed.emit(b"\x1b[Z")
             return
         if key == Qt.Key.Key_Escape:
             self.key_pressed.emit(b"\x1b")
