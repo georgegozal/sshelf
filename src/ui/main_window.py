@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QLabel, QComboBox, QPushButton, QHBoxLayout,
     QSizePolicy, QTabWidget, QTabBar,
 )
-from PyQt6.QtGui import QAction, QKeySequence, QFont, QIcon
+from PyQt6.QtGui import QAction, QColor, QKeySequence, QFont, QIcon
 from PyQt6.QtCore import Qt, QSize
 
 from src.storage.database import Database
@@ -55,6 +55,10 @@ class MainWindow(QMainWindow):
         act_quick.setShortcut(QKeySequence("Ctrl+Shift+Q"))
         act_quick.triggered.connect(self._on_quick_connect_focus)
         file_menu.addAction(act_quick)
+
+        act_import = QAction("&Import from ~/.ssh/config…", self)
+        act_import.triggered.connect(self._on_import_ssh_config)
+        file_menu.addAction(act_import)
 
         file_menu.addSeparator()
 
@@ -247,6 +251,8 @@ class MainWindow(QMainWindow):
             lambda msg, t=terminal: self._on_terminal_disconnected(t, msg)
         )
         idx = self._tabs.addTab(terminal, f"🔑 {conn.display_name()}")
+        if conn.color:
+            self._tabs.tabBar().setTabTextColor(idx, QColor(conn.color))
         self._tabs.setCurrentIndex(idx)
         terminal.start_connection()
         self.set_status(f"Connecting to {conn.connection_string()}…")
@@ -362,6 +368,13 @@ class MainWindow(QMainWindow):
             conn.host = rest
         conn.name = conn.host
         return conn
+
+    def _on_import_ssh_config(self) -> None:
+        from src.ui.ssh_config_import_dialog import SshConfigImportDialog
+        dlg = SshConfigImportDialog(self.db, self)
+        if dlg.exec():
+            self._tree.reload()
+            self.set_status("SSH config imported.")
 
     def _on_quick_connect_focus(self) -> None:
         self._qc_host.setFocus()
