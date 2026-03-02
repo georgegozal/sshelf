@@ -97,6 +97,15 @@ class SSHWorker(QObject):
             except OSError:
                 pass
 
+    def open_sftp(self):
+        """Open an SFTP session on the existing connection. Thread-safe."""
+        if self._client:
+            try:
+                return self._client.open_sftp()
+            except Exception:  # noqa: BLE001
+                return None
+        return None
+
     def disconnect(self) -> None:
         self._running = False
         self._cleanup()

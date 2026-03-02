@@ -41,6 +41,13 @@ CREATE TABLE IF NOT EXISTS preferences (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS snippets (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    title   TEXT    NOT NULL DEFAULT '',
+    command TEXT    NOT NULL DEFAULT '',
+    conn_id INTEGER
+);
 """
 
 
@@ -159,6 +166,35 @@ class Database:
             "  ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (key, value),
         )
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Snippets CRUD
+    # ------------------------------------------------------------------
+
+    def all_snippets(self, conn_id: int | None = None) -> list[dict]:
+        """Return global snippets plus connection-specific ones if conn_id given."""
+        if conn_id is not None:
+            rows = self._conn.execute(
+                "SELECT * FROM snippets WHERE conn_id IS NULL OR conn_id = ? ORDER BY id",
+                (conn_id,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM snippets WHERE conn_id IS NULL ORDER BY id"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_snippet(self, title: str, command: str,
+                     conn_id: int | None = None) -> None:
+        self._conn.execute(
+            "INSERT INTO snippets (title, command, conn_id) VALUES (?, ?, ?)",
+            (title, command, conn_id),
+        )
+        self._conn.commit()
+
+    def delete_snippet(self, snippet_id: int) -> None:
+        self._conn.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
         self._conn.commit()
 
     def close(self) -> None:

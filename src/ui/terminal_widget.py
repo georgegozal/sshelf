@@ -21,11 +21,20 @@ Normal mode
 
 from __future__ import annotations
 
+import datetime
+import re
+from pathlib import Path
+from typing import Optional
+
 import pyte
-from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QKeyEvent, QPalette, QTextCharFormat, QTextCursor
+from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal, QObject
+from PyQt6.QtGui import (
+    QColor, QFont, QFontMetrics, QKeyEvent, QPalette,
+    QTextCharFormat, QTextCursor, QTextDocument,
+)
 from PyQt6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QPlainTextEdit, QPushButton, QSplitter, QVBoxLayout, QWidget,
 )
 
 from src.models.connection import Connection
@@ -55,6 +64,9 @@ _NAMED: dict[str, str] = {
     "brightblue":    "#61afef", "brightmagenta": "#c678dd",
     "brightcyan":    "#56b6c2", "brightwhite":   "#ffffff",
 }
+
+# Strip ANSI escape codes from raw bytes (for session log)
+_ANSI_RE = re.compile(rb"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])")
 
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
@@ -129,41 +141,118 @@ class _Screen(pyte.HistoryScreen):
             self.in_alt_screen = False
 
 
+# ── SFTP setup worker ─────────────────────────────────────────────────────────
+
+class _OpenSFTPWorker(QObject):
+    """Opens an SFTP session on the existing SSH connection (background thread)."""
+
+    ready    = pyqtSignal(object)   # paramiko.SFTPClient
+    finished = pyqtSignal()
+
+    def __init__(self, worker: SSHWorker) -> None:
+        super().__init__()
+        self._worker = worker
+
+    def run(self) -> None:
+        try:
+            sftp = self._worker.open_sftp()
+            if sftp:
+                self.ready.emit(sftp)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            self.finished.emit()
+
+
 # ── Main widget ───────────────────────────────────────────────────────────────
 
 class TerminalWidget(QWidget):
     """
     Right-panel widget that opens an interactive SSH session and embeds a
     full VT100 terminal emulator (pyte) so programs like vim / htop work.
+
+    New in this revision
+    --------------------
+    - Auto-reconnect bar shown on unexpected disconnect (errors).
+    - Ctrl+F search bar to find text in the scrollback.
+    - Session logging toggle (⏺/⏹) in the header — writes plain text to
+      ~/Library/Application Support/RemminaMac/logs/.
+    - Side panel (⚡ / 📁 buttons) with a Commands tab (SnippetsPanel)
+      and an SFTP tab (SFTPPanel).
     """
 
     status_message = pyqtSignal(str)
     disconnected   = pyqtSignal(str)
 
-    def __init__(self, connection: Connection, parent: QWidget | None = None) -> None:
+    def __init__(self, connection: Connection, db=None,
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._conn   = connection
-        self._thread: QThread | None   = None
-        self._worker: SSHWorker | None = None
+        self._conn  = connection
+        self._db    = db
+        self._thread: Optional[QThread] = None
+        self._worker: Optional[SSHWorker] = None
+        self._sftp_thread: Optional[QThread] = None
+        self._sftp_worker = None
+        self._had_error = False
+        self._log_file  = None
         self._build_ui()
 
-    # ── UI ───────────────────────────────────────────────────────────────────
+    # ── UI construction ──────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header bar
+        # ── Header bar ───────────────────────────────────────────────────────
         header = QWidget()
         header.setStyleSheet("background: #2b2b2b;")
         header.setFixedHeight(32)
         hbar = QHBoxLayout(header)
         hbar.setContentsMargins(10, 0, 10, 0)
+        hbar.setSpacing(4)
+
         self._title_lbl = QLabel(f"🔑  {self._conn.connection_string()}")
         self._title_lbl.setStyleSheet("color: #ccc; font-size: 12px;")
         hbar.addWidget(self._title_lbl)
         hbar.addStretch()
+
+        # Search toggle
+        btn_search = QPushButton("🔍")
+        btn_search.setToolTip("Search (Ctrl+F)")
+        btn_search.setFixedSize(26, 26)
+        btn_search.setStyleSheet(self._hdr_btn_style())
+        btn_search.clicked.connect(self._toggle_search)
+        hbar.addWidget(btn_search)
+
+        # Logging toggle
+        self._log_btn = QPushButton("⏺")
+        self._log_btn.setToolTip("Start session logging")
+        self._log_btn.setFixedSize(26, 26)
+        self._log_btn.setStyleSheet(self._hdr_btn_style())
+        self._log_btn.clicked.connect(self._toggle_logging)
+        hbar.addWidget(self._log_btn)
+
+        # Commands / snippets toggle
+        btn_cmds = QPushButton("⚡")
+        btn_cmds.setToolTip("Commands panel")
+        btn_cmds.setFixedSize(26, 26)
+        btn_cmds.setStyleSheet(self._hdr_btn_style())
+        btn_cmds.clicked.connect(lambda: self._show_side_tab(0))
+        hbar.addWidget(btn_cmds)
+
+        # SFTP toggle
+        btn_sftp = QPushButton("📁")
+        btn_sftp.setToolTip("SFTP file browser")
+        btn_sftp.setFixedSize(26, 26)
+        btn_sftp.setStyleSheet(self._hdr_btn_style())
+        btn_sftp.clicked.connect(lambda: self._show_side_tab(1))
+        hbar.addWidget(btn_sftp)
+
+        # Separator
+        sep = QWidget(); sep.setFixedWidth(6)
+        hbar.addWidget(sep)
+
         btn_disc = QPushButton("✕ Disconnect")
         btn_disc.setStyleSheet(
             "QPushButton{color:#f55;background:transparent;border:none;}"
@@ -173,26 +262,220 @@ class TerminalWidget(QWidget):
         hbar.addWidget(btn_disc)
         layout.addWidget(header)
 
-        # Terminal area
+        # ── Search bar (hidden) ───────────────────────────────────────────────
+        self._search_bar = QWidget()
+        self._search_bar.setStyleSheet(
+            "background: #333; border-bottom: 1px solid #555;"
+        )
+        self._search_bar.setFixedHeight(36)
+        sbar = QHBoxLayout(self._search_bar)
+        sbar.setContentsMargins(8, 2, 8, 2)
+        sbar.setSpacing(4)
+        sbar.addWidget(QLabel("Find:"))
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Search in scrollback…")
+        self._search_input.setFixedWidth(240)
+        self._search_input.returnPressed.connect(self._search_next)
+        self._search_input.textChanged.connect(self._on_search_text_changed)
+        sbar.addWidget(self._search_input)
+        btn_prev = QPushButton("◀")
+        btn_prev.setFixedSize(26, 26)
+        btn_prev.setToolTip("Previous match")
+        btn_prev.clicked.connect(self._search_prev)
+        sbar.addWidget(btn_prev)
+        btn_next_s = QPushButton("▶")
+        btn_next_s.setFixedSize(26, 26)
+        btn_next_s.setToolTip("Next match")
+        btn_next_s.clicked.connect(self._search_next)
+        sbar.addWidget(btn_next_s)
+        self._search_count_lbl = QLabel("")
+        self._search_count_lbl.setStyleSheet("color: #888; font-size: 11px;")
+        sbar.addWidget(self._search_count_lbl)
+        sbar.addStretch()
+        btn_close_s = QPushButton("✕")
+        btn_close_s.setFixedSize(24, 24)
+        btn_close_s.setStyleSheet("QPushButton{color:#aaa;background:transparent;border:none;}")
+        btn_close_s.clicked.connect(self._hide_search)
+        sbar.addWidget(btn_close_s)
+        self._search_bar.hide()
+        layout.addWidget(self._search_bar)
+
+        # ── Content: terminal + side panel ───────────────────────────────────
+        self._content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        layout.addWidget(self._content_splitter)
+
+        # Terminal
         self._output = _PyteTerminal(self)
         self._output.key_pressed.connect(self._on_key)
         self._output.resize_pty.connect(self._on_resize_pty)
-        layout.addWidget(self._output)
+        self._output.search_requested.connect(self._toggle_search)
+        self._content_splitter.addWidget(self._output)
 
-        # Status bar
+        # Side panel (hidden by default)
+        self._side_panel = QWidget()
+        self._side_panel.setMinimumWidth(240)
+        self._side_panel.setStyleSheet("background: #1e1e1e;")
+        sp_layout = QVBoxLayout(self._side_panel)
+        sp_layout.setContentsMargins(0, 0, 0, 0)
+        sp_layout.setSpacing(0)
+
+        from PyQt6.QtWidgets import QTabWidget
+        self._side_tabs = QTabWidget()
+        self._side_tabs.setStyleSheet(
+            "QTabWidget::pane { border: none; }"
+            "QTabBar::tab { background: #2b2b2b; color: #ccc; padding: 4px 8px; }"
+            "QTabBar::tab:selected { background: #1e1e1e; }"
+        )
+        sp_layout.addWidget(self._side_tabs)
+
+        from src.ui.snippets_panel import SnippetsPanel
+        self._snippets_panel = SnippetsPanel(
+            db=self._db,
+            conn_id=self._conn.id,
+            parent=self,
+        )
+        self._snippets_panel.send_command.connect(
+            lambda cmd: self._on_key(cmd.encode("utf-8", errors="replace"))
+        )
+        self._side_tabs.addTab(self._snippets_panel, "⚡ Commands")
+
+        from src.ui.sftp_panel import SFTPPanel
+        self._sftp_panel = SFTPPanel(self)
+        self._side_tabs.addTab(self._sftp_panel, "📁 SFTP")
+
+        self._content_splitter.addWidget(self._side_panel)
+        self._side_panel.hide()
+
+        # ── Reconnect bar (hidden) ────────────────────────────────────────────
+        self._reconnect_bar = QWidget()
+        self._reconnect_bar.setStyleSheet(
+            "background: #2d1515; border-top: 1px solid #7a2020;"
+        )
+        self._reconnect_bar.setFixedHeight(36)
+        rbar = QHBoxLayout(self._reconnect_bar)
+        rbar.setContentsMargins(10, 4, 10, 4)
+        self._reconnect_msg = QLabel("Connection lost")
+        self._reconnect_msg.setStyleSheet("color: #ff7070;")
+        rbar.addWidget(self._reconnect_msg)
+        rbar.addStretch()
+        btn_reconnect = QPushButton("↺  Reconnect")
+        btn_reconnect.setStyleSheet(
+            "QPushButton{background:#c0392b;color:white;border-radius:4px;border:none;padding:4px 10px;}"
+            "QPushButton:hover{background:#e74c3c;}"
+        )
+        btn_reconnect.clicked.connect(self._on_reconnect)
+        rbar.addWidget(btn_reconnect)
+        self._reconnect_bar.hide()
+        layout.addWidget(self._reconnect_bar)
+
+        # ── Status bar ───────────────────────────────────────────────────────
         self._status = QLabel("Connecting…")
         self._status.setStyleSheet(
             "background:#1e1e1e;color:#888;padding:2px 8px;font-size:11px;"
         )
         layout.addWidget(self._status)
 
+    @staticmethod
+    def _hdr_btn_style() -> str:
+        return (
+            "QPushButton{background:transparent;border:none;color:#aaa;font-size:14px;}"
+            "QPushButton:hover{color:#fff;background:#444;border-radius:4px;}"
+        )
+
     def _set_status(self, msg: str) -> None:
         self._status.setText(msg)
         self.status_message.emit(msg)
 
-    # ── Connection lifecycle ─────────────────────────────────────────────────
+    # ── Search ───────────────────────────────────────────────────────────────
+
+    def _toggle_search(self) -> None:
+        if self._search_bar.isVisible():
+            self._hide_search()
+        else:
+            self._search_bar.show()
+            self._search_input.setFocus()
+            self._search_input.selectAll()
+
+    def _hide_search(self) -> None:
+        self._search_bar.hide()
+        # Clear search highlight
+        self._output.setExtraSelections([])
+        self._search_count_lbl.setText("")
+        self._output.setFocus()
+
+    def _on_search_text_changed(self, text: str) -> None:
+        if text:
+            self._search_next(wrap=False)
+
+    def _search_next(self, wrap: bool = True) -> None:
+        text = self._search_input.text()
+        if not text:
+            return
+        found = self._output.find(text)
+        if not found and wrap:
+            cur = self._output.textCursor()
+            cur.movePosition(QTextCursor.MoveOperation.Start)
+            self._output.setTextCursor(cur)
+            self._output.find(text)
+
+    def _search_prev(self) -> None:
+        text = self._search_input.text()
+        if not text:
+            return
+        found = self._output.find(text, QTextDocument.FindFlag.FindBackward)
+        if not found:
+            cur = self._output.textCursor()
+            cur.movePosition(QTextCursor.MoveOperation.End)
+            self._output.setTextCursor(cur)
+            self._output.find(text, QTextDocument.FindFlag.FindBackward)
+
+    # ── Logging ──────────────────────────────────────────────────────────────
+
+    def _toggle_logging(self) -> None:
+        if self._log_file:
+            try:
+                self._log_file.close()
+            except OSError:
+                pass
+            self._log_file = None
+            self._log_btn.setText("⏺")
+            self._log_btn.setToolTip("Start session logging")
+            self._set_status("Logging stopped.")
+        else:
+            log_dir = (
+                Path.home() / "Library" / "Application Support"
+                / "RemminaMac" / "logs"
+            )
+            log_dir.mkdir(parents=True, exist_ok=True)
+            ts   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            name = re.sub(r"[^\w.-]", "_", self._conn.display_name())
+            path = log_dir / f"{name}_{ts}.log"
+            try:
+                self._log_file = open(path, "wb")  # noqa: WPS515
+                self._log_btn.setText("⏹")
+                self._log_btn.setToolTip(f"Stop logging  ({path.name})")
+                self._set_status(f"Logging to {path.name}")
+            except OSError as exc:
+                self._set_status(f"Cannot open log file: {exc}")
+
+    # ── Side panel ───────────────────────────────────────────────────────────
+
+    def _show_side_tab(self, index: int) -> None:
+        """Show the side panel and switch to the given tab index."""
+        if self._side_panel.isVisible() and self._side_tabs.currentIndex() == index:
+            self._side_panel.hide()
+        else:
+            self._side_panel.show()
+            self._side_tabs.setCurrentIndex(index)
+            sizes = self._content_splitter.sizes()
+            total = sum(sizes)
+            if sizes[1] < 200:
+                self._content_splitter.setSizes([total - 280, 280])
+
+    # ── Connection lifecycle ──────────────────────────────────────────────────
 
     def start_connection(self) -> None:
+        self._had_error = False
         self._thread = QThread(self)
         self._worker = SSHWorker(self._conn)
         self._worker.moveToThread(self._thread)
@@ -208,28 +491,78 @@ class TerminalWidget(QWidget):
             self._worker.disconnect()
         self._set_status("Disconnected.")
 
-    # ── Worker signals ───────────────────────────────────────────────────────
+    # ── Worker signals ────────────────────────────────────────────────────────
 
     def _on_connected(self) -> None:
         self._set_status(f"Connected to {self._conn.connection_string()}")
         self._output.setFocus()
+        # Open SFTP in background 800 ms after connect (non-blocking)
+        QTimer.singleShot(800, self._setup_sftp)
+
+    def _setup_sftp(self) -> None:
+        if not self._worker:
+            return
+        self._sftp_thread = QThread(self)
+        self._sftp_worker = _OpenSFTPWorker(self._worker)
+        self._sftp_worker.moveToThread(self._sftp_thread)
+        self._sftp_thread.started.connect(self._sftp_worker.run)
+        self._sftp_worker.ready.connect(self._sftp_panel.connect_sftp)
+        self._sftp_worker.finished.connect(self._sftp_thread.quit)
+        self._sftp_thread.start()
 
     def _on_data(self, raw: bytes) -> None:
         self._output.feed(raw)
+        if self._log_file:
+            try:
+                self._log_file.write(_ANSI_RE.sub(b"", raw))
+                self._log_file.flush()
+            except OSError:
+                pass
 
     def _on_error(self, msg: str) -> None:
+        self._had_error = True
         self._set_status(f"Error: {msg}")
         self._output.feed(f"\r\n\x1b[31m*** {msg} ***\x1b[0m\r\n".encode())
-        self.disconnected.emit(f"Error: {msg}")
+        self._reconnect_msg.setText(f"Connection lost: {msg}")
+        self._reconnect_bar.show()
+        # Do NOT emit disconnected — keep the tab open for reconnect
 
     def _on_finished(self) -> None:
-        self._set_status("Session closed.")
-        self._output.feed(b"\r\n[Session closed]\r\n")
         if self._thread:
             self._thread.quit()
+        if self._had_error:
+            return  # reconnect bar is already shown — nothing else to do
+        self._set_status("Session closed.")
+        self._output.feed(b"\r\n[Session closed]\r\n")
         self.disconnected.emit("Session closed.")
 
-    # ── Key / resize forwarding ──────────────────────────────────────────────
+    # ── Reconnect ─────────────────────────────────────────────────────────────
+
+    def _on_reconnect(self) -> None:
+        self._reconnect_bar.hide()
+        self._had_error = False
+
+        # Disconnect signals from old worker so stale callbacks don't fire
+        if self._worker:
+            for sig in (
+                self._worker.connected, self._worker.data_received,
+                self._worker.error, self._worker.finished,
+            ):
+                try:
+                    sig.disconnect()
+                except TypeError:
+                    pass
+            self._worker.disconnect()
+        if self._thread:
+            self._thread.quit()
+            self._thread.wait(2000)
+        self._worker = None
+        self._thread = None
+
+        self._output.feed(b"\r\n\x1b[33m[Reconnecting\xe2\x80\xa6]\x1b[0m\r\n")
+        self.start_connection()
+
+    # ── Key / resize forwarding ───────────────────────────────────────────────
 
     def _on_key(self, data: bytes) -> None:
         if self._worker:
@@ -239,10 +572,16 @@ class TerminalWidget(QWidget):
         if self._worker:
             self._worker.resize(cols, rows)
 
-    # ── Cleanup ──────────────────────────────────────────────────────────────
+    # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def shutdown(self) -> None:
         """Gracefully stop the SSH session and worker thread."""
+        if self._log_file:
+            try:
+                self._log_file.close()
+            except OSError:
+                pass
+            self._log_file = None
         if self._worker:
             self._worker.disconnect()
         if self._thread:
@@ -281,8 +620,9 @@ class _PyteTerminal(QPlainTextEdit):
         they reach keyPressEvent() rather than triggering menu actions.
     """
 
-    key_pressed = pyqtSignal(bytes)
-    resize_pty  = pyqtSignal(int, int)   # cols, rows
+    key_pressed     = pyqtSignal(bytes)
+    resize_pty      = pyqtSignal(int, int)   # cols, rows
+    search_requested = pyqtSignal()
 
     # Qt key → ANSI/VT sequence
     _KEY_MAP: dict[int, bytes] = {
@@ -589,10 +929,11 @@ class _PyteTerminal(QPlainTextEdit):
         mods = event.modifiers()
         text = event.text()
 
-        # Ctrl+Shift+C/V or Cmd+C/V (macOS) → copy/paste, never send to SSH
         ctrl  = bool(mods & Qt.KeyboardModifier.ControlModifier)
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
         meta  = bool(mods & Qt.KeyboardModifier.MetaModifier)
+
+        # Ctrl+Shift+C/V or Cmd+C/V (macOS) → copy/paste, never send to SSH
         if key == Qt.Key.Key_C:
             if (ctrl and shift) or (meta and not ctrl):
                 self._copy_selection()
@@ -613,6 +954,11 @@ class _PyteTerminal(QPlainTextEdit):
             if key == Qt.Key.Key_0:
                 self._zoom_font(0)
                 return
+
+        # Ctrl+F → open search bar (do NOT send \x06 to SSH)
+        if ctrl and key == Qt.Key.Key_F:
+            self.search_requested.emit()
+            return
 
         # Ctrl+[A-Z] → control bytes
         if ctrl:

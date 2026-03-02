@@ -245,7 +245,7 @@ class MainWindow(QMainWindow):
                     self._tabs.setCurrentIndex(i)
                     return
 
-        terminal = TerminalWidget(conn, self)
+        terminal = TerminalWidget(conn, db=self.db, parent=self)
         terminal.status_message.connect(self.set_status)
         terminal.disconnected.connect(
             lambda msg, t=terminal: self._on_terminal_disconnected(t, msg)
