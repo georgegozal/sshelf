@@ -35,6 +35,9 @@ from src.protocols.ssh import SSHWorker
 _PTY_COLS_DEFAULT = 220
 _PTY_ROWS_DEFAULT = 50
 _HISTORY          = 2000   # scrollback lines kept in pyte
+_FONT_SIZE_DEFAULT = 13
+_FONT_SIZE_MIN     = 6
+_FONT_SIZE_MAX     = 36
 
 # ── Colour defaults (One Dark) ───────────────────────────────────────────────
 _DEFAULT_FG = "#d4d4d4"
@@ -337,6 +340,18 @@ class _PyteTerminal(QPlainTextEdit):
         self.setStyleSheet("border: none; padding: 4px;")
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
+    # ── Font zoom ─────────────────────────────────────────────────────────────
+
+    def _zoom_font(self, delta: int) -> None:
+        """Increase/decrease font size by delta pt; delta=0 resets to default."""
+        font = self.font()
+        if delta == 0:
+            font.setPointSize(_FONT_SIZE_DEFAULT)
+        else:
+            font.setPointSize(max(_FONT_SIZE_MIN, min(_FONT_SIZE_MAX, font.pointSize() + delta)))
+        self.setFont(font)
+        self._sync_pty_size()
+
     # ── Clipboard ─────────────────────────────────────────────────────────────
 
     def _copy_selection(self) -> None:
@@ -585,6 +600,18 @@ class _PyteTerminal(QPlainTextEdit):
         if key == Qt.Key.Key_V:
             if (ctrl and shift) or (meta and not ctrl):
                 self._paste_clipboard()
+                return
+
+        # Cmd+= / Cmd++ → zoom in  |  Cmd+- → zoom out  |  Cmd+0 → reset
+        if meta and not ctrl:
+            if key in (Qt.Key.Key_Equal, Qt.Key.Key_Plus):
+                self._zoom_font(+1)
+                return
+            if key == Qt.Key.Key_Minus:
+                self._zoom_font(-1)
+                return
+            if key == Qt.Key.Key_0:
+                self._zoom_font(0)
                 return
 
         # Ctrl+[A-Z] → control bytes
