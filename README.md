@@ -114,6 +114,17 @@ remminamac/
 | Passwords | macOS Keychain (service: `RemminaMac`) |
 | Preferences | Same SQLite database, `preferences` table |
 
+## Documentation
+
+Detailed documentation lives in the [`docs/`](docs/) folder:
+
+| Document | Contents |
+|----------|----------|
+| [architecture.md](docs/architecture.md) | Layer overview, data flow, key design decisions |
+| [terminal-internals.md](docs/terminal-internals.md) | pyte integration, rendering strategy, keyboard handling |
+| [security.md](docs/security.md) | Keychain storage, SSH auth, known limitations |
+| [development.md](docs/development.md) | Dev setup, adding fields/protocols, debugging tips |
+
 ## License
 
 RemminaMac is free software released under the **GNU General Public License v3.0**.
