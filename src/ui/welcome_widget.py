@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
 )
@@ -13,8 +15,9 @@ from src.models.connection import Connection
 class WelcomeWidget(QWidget):
     """Shown when no connection is selected."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, db=None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._db = db
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -36,6 +39,45 @@ class WelcomeWidget(QWidget):
 
         for w in (icon, title, subtitle):
             layout.addWidget(w)
+
+        # Recent connections
+        if db:
+            recent = self._load_recent(db)
+            if recent:
+                layout.addSpacing(24)
+                hdr = QLabel("Recent")
+                hdr.setStyleSheet("font-size: 13px; font-weight: bold; color: palette(mid);")
+                hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                layout.addWidget(hdr)
+                for conn in recent:
+                    btn = QPushButton(f"🔑  {conn.display_name()}")
+                    btn.setFixedWidth(300)
+                    btn.setStyleSheet(
+                        "QPushButton { text-align: left; padding: 6px 12px;"
+                        " border: 1px solid palette(mid); border-radius: 6px; }"
+                        "QPushButton:hover { background: palette(highlight); color: palette(highlighted-text); }"
+                    )
+                    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    btn.clicked.connect(lambda _checked, c=conn: self._open(c))
+                    layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    @staticmethod
+    def _load_recent(db) -> list[Connection]:
+        raw = db.get_pref("recent_connections")
+        if not raw:
+            return []
+        ids: list[int] = json.loads(raw)
+        result = []
+        for cid in ids:
+            conn = db.get_connection(cid)
+            if conn:
+                result.append(conn)
+        return result
+
+    def _open(self, conn: Connection) -> None:
+        win = self.window()
+        if hasattr(win, "_on_connection_activated"):
+            win._on_connection_activated(conn)
 
 
 class DetailWidget(QWidget):

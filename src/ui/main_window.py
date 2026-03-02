@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout, QToolBar,
     QStatusBar, QMenuBar, QMenu, QMessageBox, QApplication,
@@ -98,6 +100,24 @@ class MainWindow(QMainWindow):
         self._act_toggle_tree.setShortcut(QKeySequence("Ctrl+Shift+L"))
         self._act_toggle_tree.triggered.connect(self._on_toggle_tree)
         view_menu.addAction(self._act_toggle_tree)
+
+        # Window
+        win_menu: QMenu = mb.addMenu("&Window")
+
+        act_close_tab = QAction("Close Tab", self)
+        act_close_tab.setShortcut(QKeySequence("Ctrl+W"))
+        act_close_tab.triggered.connect(self._on_close_current_tab)
+        win_menu.addAction(act_close_tab)
+
+        win_menu.addSeparator()
+
+        # Cmd+1–9: switch to tab by position (invisible — added to window only)
+        for i in range(1, 10):
+            act = QAction(f"Select Tab {i}", self)
+            act.setShortcut(QKeySequence(f"Ctrl+{i}"))
+            act.triggered.connect(lambda checked, n=i - 1: self._tabs.setCurrentIndex(n))
+            act.setVisible(False)   # keyboard-only; not shown in menu
+            win_menu.addAction(act)
 
         # Help
         help_menu: QMenu = mb.addMenu("&Help")
@@ -196,7 +216,7 @@ class MainWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 1)
 
         # Permanent home tab at index 0 — no close button
-        self._tabs.addTab(WelcomeWidget(self), "Home")
+        self._tabs.addTab(WelcomeWidget(self.db, self), "Home")
         self._tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
 
         # Wire tree signals
@@ -255,6 +275,7 @@ class MainWindow(QMainWindow):
             self._tabs.tabBar().setTabTextColor(idx, QColor(conn.color))
         self._tabs.setCurrentIndex(idx)
         terminal.start_connection()
+        self._track_recent(conn)
         self.set_status(f"Connecting to {conn.connection_string()}…")
 
     def _on_terminal_disconnected(self, terminal, msg: str) -> None:
@@ -276,6 +297,22 @@ class MainWindow(QMainWindow):
         self._tabs.removeTab(index)
         if widget:
             widget.deleteLater()
+
+    def _on_close_current_tab(self) -> None:
+        idx = self._tabs.currentIndex()
+        if idx > 0:
+            self._on_tab_close_requested(idx)
+
+    def _track_recent(self, conn: Connection) -> None:
+        """Keep a list of the 5 most-recently opened connection IDs in prefs."""
+        if conn.id is None:
+            return
+        raw = self.db.get_pref("recent_connections")
+        ids: list[int] = json.loads(raw) if raw else []
+        if conn.id in ids:
+            ids.remove(conn.id)
+        ids.insert(0, conn.id)
+        self.db.set_pref("recent_connections", json.dumps(ids[:5]))
 
     # ------------------------------------------------------------------
     # Slot: tree signals
@@ -299,7 +336,7 @@ class MainWindow(QMainWindow):
         self._btn_edit.setEnabled(False)
         self._btn_del.setEnabled(False)
         from src.ui.welcome_widget import WelcomeWidget
-        self._update_home_tab(WelcomeWidget(self), "Home")
+        self._update_home_tab(WelcomeWidget(self.db, self), "Home")
 
     # ------------------------------------------------------------------
     # Slot: toolbar / menu actions
