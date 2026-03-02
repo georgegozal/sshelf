@@ -25,7 +25,7 @@ import pyte
 from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QKeyEvent, QPalette, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
 from src.models.connection import Connection
@@ -332,6 +332,35 @@ class _PyteTerminal(QPlainTextEdit):
         self.setStyleSheet("border: none; padding: 4px;")
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
+    # ── Clipboard ─────────────────────────────────────────────────────────────
+
+    def _copy_selection(self) -> None:
+        """Copy selected text to the system clipboard."""
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            QApplication.clipboard().setText(cursor.selectedText())
+
+    def _paste_clipboard(self) -> None:
+        """Send clipboard text to the SSH channel as if typed."""
+        text = QApplication.clipboard().text()
+        if text:
+            self.key_pressed.emit(text.encode("utf-8", errors="replace"))
+
+    def contextMenuEvent(self, event) -> None:
+        """Right-click context menu with Copy and Paste actions."""
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy")
+        copy_action.setShortcut("Ctrl+Shift+C")
+        copy_action.setEnabled(self.textCursor().hasSelection())
+        paste_action = menu.addAction("Paste")
+        paste_action.setShortcut("Ctrl+Shift+V")
+        paste_action.setEnabled(bool(QApplication.clipboard().text()))
+        chosen = menu.exec(event.globalPos())
+        if chosen == copy_action:
+            self._copy_selection()
+        elif chosen == paste_action:
+            self._paste_clipboard()
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def feed(self, raw: bytes) -> None:
@@ -540,8 +569,21 @@ class _PyteTerminal(QPlainTextEdit):
         mods = event.modifiers()
         text = event.text()
 
+        # Ctrl+Shift+C/V or Cmd+C/V (macOS) → copy/paste, never send to SSH
+        ctrl  = bool(mods & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+        meta  = bool(mods & Qt.KeyboardModifier.MetaModifier)
+        if key == Qt.Key.Key_C:
+            if (ctrl and shift) or (meta and not ctrl):
+                self._copy_selection()
+                return
+        if key == Qt.Key.Key_V:
+            if (ctrl and shift) or (meta and not ctrl):
+                self._paste_clipboard()
+                return
+
         # Ctrl+[A-Z] → control bytes
-        if mods & Qt.KeyboardModifier.ControlModifier:
+        if ctrl:
             char = text.lower()
             if char:
                 code = ord(char) - ord("a") + 1
