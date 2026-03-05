@@ -59,6 +59,10 @@ class SplitView(QWidget):
         """True when this view was opened for *conn* (by saved ID)."""
         return self._conn.id is not None and self._conn.id == conn.id
 
+    def get_terminals(self) -> list:
+        """Return a snapshot of the current live TerminalWidget panes."""
+        return list(self._terminals)
+
     def shutdown(self) -> None:
         """Gracefully shut down all panes (called when the tab is force-closed)."""
         for t in list(self._terminals):

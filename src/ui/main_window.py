@@ -84,6 +84,9 @@ class MainWindow(QMainWindow):
         if geom:
             self.restoreGeometry(bytes.fromhex(geom))
 
+        # Apply saved terminal theme
+        self._apply_terminal_theme_from_prefs()
+
     # ------------------------------------------------------------------
     # Menu bar
     # ------------------------------------------------------------------
@@ -107,6 +110,10 @@ class MainWindow(QMainWindow):
         act_import = QAction("&Import from ~/.ssh/config…", self)
         act_import.triggered.connect(self._on_import_ssh_config)
         file_menu.addAction(act_import)
+
+        act_keygen = QAction("🔑 &Generate SSH Key…", self)
+        act_keygen.triggered.connect(self._on_generate_key)
+        file_menu.addAction(act_keygen)
 
         file_menu.addSeparator()
 
@@ -235,6 +242,20 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tb.addWidget(spacer)
 
+        # Broadcast toggle
+        self._btn_broadcast = QPushButton("📡")
+        self._btn_broadcast.setToolTip("Broadcast input to all terminal panes (off)")
+        self._btn_broadcast.setCheckable(True)
+        self._btn_broadcast.setFixedSize(28, 28)
+        self._btn_broadcast.setStyleSheet(
+            "QPushButton{background:transparent;border:none;font-size:16px;color:#888;}"
+            "QPushButton:checked{color:#e5c07b;}"
+            "QPushButton:hover{color:#fff;}"
+        )
+        self._btn_broadcast.toggled.connect(self._on_broadcast_toggled)
+        tb.addWidget(self._btn_broadcast)
+        self._broadcast_active = False
+
         self._search_box = QLineEdit()
         self._search_box.setPlaceholderText("🔍  Search connections…")
         self._search_box.setFixedWidth(200)
@@ -336,6 +357,8 @@ class MainWindow(QMainWindow):
         self.set_status(f"Connecting to {conn.connection_string()}…")
         if hasattr(self, "_tray"):
             self._refresh_tray_menu()
+        if hasattr(self, "_broadcast_active") and self._broadcast_active:
+            self._rewire_broadcast()
 
     def _on_split_view_closed(self, view) -> None:
         """Remove the tab when the last pane in a SplitView closes cleanly."""
@@ -470,6 +493,10 @@ class MainWindow(QMainWindow):
             self._tree.reload()
             self.set_status("SSH config imported.")
 
+    def _on_generate_key(self) -> None:
+        from src.ui.key_gen_dialog import KeyGenerationDialog
+        KeyGenerationDialog(self).exec()
+
     def _on_quick_connect_focus(self) -> None:
         self._qc_host.setFocus()
         self._qc_host.selectAll()
@@ -482,7 +509,67 @@ class MainWindow(QMainWindow):
 
     def _on_preferences(self) -> None:
         from src.ui.preferences_dialog import PreferencesDialog
-        PreferencesDialog(self.db, self).exec()
+        dlg = PreferencesDialog(self.db, self)
+        if dlg.exec():
+            self._apply_terminal_theme_from_prefs()
+
+    def _apply_terminal_theme_from_prefs(self) -> None:
+        """Load the saved terminal theme pref and apply it to all open terminals."""
+        from src.ui.themes import get_theme, theme_names
+        from src.ui.terminal_widget import apply_terminal_theme
+        name = self.db.get_pref("terminal_theme", theme_names()[0])
+        theme = get_theme(name)
+        apply_terminal_theme(theme)
+        # Refresh any already-open terminal panes
+        from src.ui.split_view import SplitView
+        for i in range(1, self._tabs.count()):
+            w = self._tabs.widget(i)
+            if isinstance(w, SplitView):
+                for t in w.get_terminals():
+                    t._output.refresh_theme()
+
+    # ── Broadcast input ───────────────────────────────────────────────────────
+
+    def _on_broadcast_toggled(self, active: bool) -> None:
+        """Enable/disable broadcast: route key_input from active pane to all others."""
+        self._broadcast_active = active
+        tip = "Broadcast input to all terminal panes (ON)" if active else \
+              "Broadcast input to all terminal panes (off)"
+        self._btn_broadcast.setToolTip(tip)
+        self.set_status("Broadcast ON — keystrokes sent to all panes." if active
+                        else "Broadcast OFF.")
+        self._rewire_broadcast()
+
+    def _rewire_broadcast(self) -> None:
+        """Connect/disconnect key_input → send_data across all open panes."""
+        from src.ui.split_view import SplitView
+
+        # Collect every terminal currently open in tabs + detached windows
+        all_terminals: list = []
+        for i in range(1, self._tabs.count()):
+            w = self._tabs.widget(i)
+            if isinstance(w, SplitView):
+                all_terminals.extend(w.get_terminals())
+        for win in self._detached_windows:
+            inner = win.centralWidget()
+            if isinstance(inner, SplitView):
+                all_terminals.extend(inner.get_terminals())
+
+        # Always disconnect first to avoid duplicate connections
+        for t in all_terminals:
+            try:
+                t.key_input.disconnect()
+            except TypeError:
+                pass  # no connections yet
+
+        if not self._broadcast_active:
+            return
+
+        # Re-wire: each terminal broadcasts to all *other* terminals
+        for src in all_terminals:
+            for dst in all_terminals:
+                if dst is not src:
+                    src.key_input.connect(dst.send_data)
 
     def _on_about(self) -> None:
         QMessageBox.about(

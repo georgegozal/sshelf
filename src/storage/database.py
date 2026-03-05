@@ -48,6 +48,17 @@ CREATE TABLE IF NOT EXISTS snippets (
     command TEXT    NOT NULL DEFAULT '',
     conn_id INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS tunnels (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    conn_id      INTEGER NOT NULL,
+    label        TEXT    NOT NULL DEFAULT '',
+    type         TEXT    NOT NULL DEFAULT 'local',
+    local_port   INTEGER NOT NULL DEFAULT 0,
+    remote_host  TEXT    NOT NULL DEFAULT '',
+    remote_port  INTEGER NOT NULL DEFAULT 0,
+    enabled      INTEGER NOT NULL DEFAULT 1
+);
 """
 
 
@@ -195,6 +206,45 @@ class Database:
 
     def delete_snippet(self, snippet_id: int) -> None:
         self._conn.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
+        self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Tunnels CRUD
+    # ------------------------------------------------------------------
+
+    def all_tunnels(self, conn_id: int) -> list[dict]:
+        """Return all tunnel records for a connection, ordered by id."""
+        rows = self._conn.execute(
+            "SELECT * FROM tunnels WHERE conn_id = ? ORDER BY id", (conn_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def save_tunnel(self, tunnel) -> object:
+        """Insert or update a Tunnel dataclass. Returns the tunnel with id set."""
+        d = tunnel.to_dict()
+        if tunnel.id is None:
+            cur = self._conn.execute(
+                """INSERT INTO tunnels
+                   (conn_id, label, type, local_port, remote_host, remote_port, enabled)
+                   VALUES
+                   (:conn_id, :label, :type, :local_port, :remote_host, :remote_port, :enabled)""",
+                d,
+            )
+            tunnel.id = cur.lastrowid
+        else:
+            self._conn.execute(
+                """UPDATE tunnels SET
+                   conn_id=:conn_id, label=:label, type=:type,
+                   local_port=:local_port, remote_host=:remote_host,
+                   remote_port=:remote_port, enabled=:enabled
+                   WHERE id=:id""",
+                d,
+            )
+        self._conn.commit()
+        return tunnel
+
+    def delete_tunnel(self, tunnel_id: int) -> None:
+        self._conn.execute("DELETE FROM tunnels WHERE id = ?", (tunnel_id,))
         self._conn.commit()
 
     def close(self) -> None:

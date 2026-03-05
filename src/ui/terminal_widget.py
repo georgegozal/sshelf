@@ -48,7 +48,7 @@ _FONT_SIZE_DEFAULT = 13
 _FONT_SIZE_MIN     = 6
 _FONT_SIZE_MAX     = 36
 
-# ── Colour defaults (One Dark) ───────────────────────────────────────────────
+# ── Colour defaults (One Dark — overridden by apply_terminal_theme()) ─────────
 _DEFAULT_FG = "#d4d4d4"
 _DEFAULT_BG = "#1e1e1e"
 _CURSOR_BG  = "#528bff"
@@ -64,6 +64,39 @@ _NAMED: dict[str, str] = {
     "brightblue":    "#61afef", "brightmagenta": "#c678dd",
     "brightcyan":    "#56b6c2", "brightwhite":   "#ffffff",
 }
+
+
+# ── Theme application ─────────────────────────────────────────────────────────
+
+def apply_terminal_theme(theme) -> None:
+    """
+    Patch the module-level colour globals from a ``Theme`` object.
+
+    Call this before (or after) opening terminals; existing terminals
+    should call ``_PyteTerminal.refresh_theme()`` to repaint.
+    """
+    global _DEFAULT_FG, _DEFAULT_BG, _CURSOR_BG, _NAMED
+    _DEFAULT_FG = theme.fg
+    _DEFAULT_BG = theme.bg
+    _CURSOR_BG  = theme.cursor
+    _NAMED = {
+        "black":         theme.black,
+        "red":           theme.red,
+        "green":         theme.green,
+        "yellow":        theme.yellow,
+        "blue":          theme.blue,
+        "magenta":       theme.magenta,
+        "cyan":          theme.cyan,
+        "white":         theme.white,
+        "brightblack":   theme.bright_black,
+        "brightred":     theme.bright_red,
+        "brightgreen":   theme.bright_green,
+        "brightyellow":  theme.bright_yellow,
+        "brightblue":    theme.bright_blue,
+        "brightmagenta": theme.bright_magenta,
+        "brightcyan":    theme.bright_cyan,
+        "brightwhite":   theme.bright_white,
+    }
 
 # Strip ANSI escape codes from raw bytes (for session log)
 _ANSI_RE = re.compile(rb"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])")
@@ -194,6 +227,7 @@ class TerminalWidget(QWidget):
     disconnected    = pyqtSignal(str)
     split_requested = pyqtSignal()          # user clicked ⊞ Split
     health_changed  = pyqtSignal(int, str)  # (conn_id, "connected"|"error"|"disconnected")
+    key_input       = pyqtSignal(bytes)     # emitted when broadcast is active
 
     def __init__(self, connection: Connection, db=None,
                  parent: QWidget | None = None) -> None:
@@ -269,6 +303,14 @@ class TerminalWidget(QWidget):
         btn_sftp.setStyleSheet(self._hdr_btn_style())
         btn_sftp.clicked.connect(lambda: self._show_side_tab(1))
         hbar.addWidget(btn_sftp)
+
+        # Tunnel panel toggle
+        btn_tunnels = QPushButton("🔀")
+        btn_tunnels.setToolTip("Port forwarding tunnels")
+        btn_tunnels.setFixedSize(26, 26)
+        btn_tunnels.setStyleSheet(self._hdr_btn_style())
+        btn_tunnels.clicked.connect(lambda: self._show_side_tab(2))
+        hbar.addWidget(btn_tunnels)
 
         # Split pane
         btn_split = QPushButton("⊞")
@@ -371,6 +413,14 @@ class TerminalWidget(QWidget):
         from src.ui.sftp_panel import SFTPPanel
         self._sftp_panel = SFTPPanel(self)
         self._side_tabs.addTab(self._sftp_panel, "📁 SFTP")
+
+        from src.ui.tunnel_panel import TunnelPanel
+        self._tunnel_panel = TunnelPanel(
+            db=self._db,
+            conn_id=self._conn.id,
+            parent=self,
+        )
+        self._side_tabs.addTab(self._tunnel_panel, "🔀 Tunnels")
 
         self._content_splitter.addWidget(self._side_panel)
         self._side_panel.hide()
@@ -537,6 +587,8 @@ class TerminalWidget(QWidget):
         self._stats_timer.start()
         # Open SFTP in background 800 ms after connect (non-blocking)
         QTimer.singleShot(800, self._setup_sftp)
+        # Start port-forwarding tunnels
+        self._tunnel_panel.set_worker(self._worker)
 
     def _setup_sftp(self) -> None:
         if not self._worker:
@@ -578,6 +630,7 @@ class TerminalWidget(QWidget):
         if self._stats_timer:
             self._stats_timer.stop()
             self._stats_timer = None
+        self._tunnel_panel.set_worker(None)
         if self._had_error:
             return  # reconnect bar is already shown — nothing else to do
         self._set_status("Session closed.")
@@ -618,12 +671,19 @@ class TerminalWidget(QWidget):
         self._bytes_tx += len(data)
         if self._worker:
             self._worker.send(data)
+        self.key_input.emit(data)   # picked up by MainWindow broadcast logic
 
     def _on_resize_pty(self, cols: int, rows: int) -> None:
         if self._worker:
             self._worker.resize(cols, rows)
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
+
+    def send_data(self, data: bytes) -> None:
+        """Send raw bytes to SSH without emitting key_input (broadcast target slot)."""
+        self._bytes_tx += len(data)
+        if self._worker:
+            self._worker.send(data)
 
     def shutdown(self) -> None:
         """Gracefully stop the SSH session and worker thread."""
@@ -636,6 +696,7 @@ class TerminalWidget(QWidget):
             except OSError:
                 pass
             self._log_file = None
+        self._tunnel_panel.set_worker(None)
         if self._worker:
             self._worker.disconnect()
         if self._thread:
@@ -735,6 +796,16 @@ class _PyteTerminal(QPlainTextEdit):
         self.setPalette(pal)
         self.setStyleSheet("border: none; padding: 4px;")
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+
+    # ── Theme ─────────────────────────────────────────────────────────────────
+
+    def refresh_theme(self) -> None:
+        """Re-apply the current module-level colour globals to this widget's palette."""
+        pal = self.palette()
+        pal.setColor(QPalette.ColorRole.Base, QColor(_DEFAULT_BG))
+        pal.setColor(QPalette.ColorRole.Text, QColor(_DEFAULT_FG))
+        self.setPalette(pal)
+        self._render()
 
     # ── Font zoom ─────────────────────────────────────────────────────────────
 

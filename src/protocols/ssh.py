@@ -106,6 +106,12 @@ class SSHWorker(QObject):
                 return None
         return None
 
+    def get_transport(self):
+        """Return the underlying paramiko Transport (used by tunnel workers)."""
+        if self._client:
+            return self._client.get_transport()
+        return None
+
     def disconnect(self) -> None:
         self._running = False
         self._cleanup()

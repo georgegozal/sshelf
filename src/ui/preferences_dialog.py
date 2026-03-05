@@ -48,7 +48,15 @@ class PreferencesDialog(QDialog):
         self._theme.addItems(["System", "Light", "Dark"])
         saved = db.get_pref("app_theme", "system")
         self._theme.setCurrentIndex({"system": 0, "light": 1, "dark": 2}.get(saved, 0))
-        form.addRow("Theme:", self._theme)
+        form.addRow("App theme:", self._theme)
+
+        from src.ui.themes import theme_names
+        self._terminal_theme = QComboBox()
+        self._terminal_theme.addItems(theme_names())
+        saved_tt = db.get_pref("terminal_theme", theme_names()[0])
+        idx = self._terminal_theme.findText(saved_tt)
+        self._terminal_theme.setCurrentIndex(max(0, idx))
+        form.addRow("Terminal theme:", self._terminal_theme)
 
         layout.addLayout(form)
 
@@ -67,4 +75,6 @@ class PreferencesDialog(QDialog):
         theme = ["system", "light", "dark"][self._theme.currentIndex()]
         self.db.set_pref("app_theme", theme)
         Application.apply_theme(theme)
+        terminal_theme_name = self._terminal_theme.currentText()
+        self.db.set_pref("terminal_theme", terminal_theme_name)
         self.accept()
