@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
     QMenu, QAbstractItemView, QHeaderView,
 )
-from PyQt6.QtGui import QAction, QFont, QColor, QBrush
+from PyQt6.QtGui import QAction, QFont, QColor, QBrush, QIcon, QPixmap, QPainter
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 
 from src.storage.database import Database
@@ -52,6 +52,7 @@ class ConnectionTree(QWidget):
         self.db = db
         self._filter_text = ""
         self._connections: list[Connection] = []
+        self._health: dict[int, str] = {}  # conn_id → "connected"|"error"|"disconnected"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -96,9 +97,47 @@ class ConnectionTree(QWidget):
             return None
         return items[0].data(0, Qt.ItemDataRole.UserRole)
 
+    def set_health(self, conn_id: int, status: str) -> None:
+        """Update the live health indicator for a connection in the tree.
+
+        status: "connected" → green dot, "error" → red dot, "disconnected" → no dot.
+        """
+        self._health[conn_id] = status
+        # Walk the current tree to find and update the item in-place
+        root = self._tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            group = root.child(i)
+            for j in range(group.childCount()):
+                item = group.child(j)
+                conn = item.data(0, Qt.ItemDataRole.UserRole)
+                if conn and conn.id == conn_id:
+                    self._apply_health_to_item(item, status)
+                    return
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_health_icon(status: str) -> QIcon:
+        """Create a small 12×12 filled-circle icon for the given health status."""
+        px = QPixmap(12, 12)
+        px.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(px)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor("#98c379") if status == "connected" else QColor("#e06c75")
+        painter.setBrush(color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(1, 1, 10, 10)
+        painter.end()
+        return QIcon(px)
+
+    def _apply_health_to_item(self, item: QTreeWidgetItem, status: str) -> None:
+        """Set or clear the health icon on a tree item."""
+        if status in ("connected", "error"):
+            item.setIcon(0, self._make_health_icon(status))
+        else:
+            item.setIcon(0, QIcon())   # clear dot when disconnected
 
     def _repopulate(self) -> None:
         """Clear and rebuild the tree from self._connections."""
@@ -150,6 +189,12 @@ class ConnectionTree(QWidget):
             # Colour dot using the connection's assigned colour
             if conn.color:
                 c_item.setForeground(0, QBrush(QColor(conn.color)))
+
+            # Health indicator — restore live dot after repopulate
+            if conn.id is not None:
+                health = self._health.get(conn.id)
+                if health and health != "disconnected":
+                    self._apply_health_to_item(c_item, health)
 
             groups[group_name].addChild(c_item)
 

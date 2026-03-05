@@ -181,8 +181,10 @@ class TerminalWidget(QWidget):
       and an SFTP tab (SFTPPanel).
     """
 
-    status_message = pyqtSignal(str)
-    disconnected   = pyqtSignal(str)
+    status_message  = pyqtSignal(str)
+    disconnected    = pyqtSignal(str)
+    split_requested = pyqtSignal()          # user clicked ⊞ Split
+    health_changed  = pyqtSignal(int, str)  # (conn_id, "connected"|"error"|"disconnected")
 
     def __init__(self, connection: Connection, db=None,
                  parent: QWidget | None = None) -> None:
@@ -248,6 +250,14 @@ class TerminalWidget(QWidget):
         btn_sftp.setStyleSheet(self._hdr_btn_style())
         btn_sftp.clicked.connect(lambda: self._show_side_tab(1))
         hbar.addWidget(btn_sftp)
+
+        # Split pane
+        btn_split = QPushButton("⊞")
+        btn_split.setToolTip("Split pane — open a new terminal alongside this one")
+        btn_split.setFixedSize(26, 26)
+        btn_split.setStyleSheet(self._hdr_btn_style())
+        btn_split.clicked.connect(self.split_requested)
+        hbar.addWidget(btn_split)
 
         # Separator
         sep = QWidget(); sep.setFixedWidth(6)
@@ -496,6 +506,8 @@ class TerminalWidget(QWidget):
     def _on_connected(self) -> None:
         self._set_status(f"Connected to {self._conn.connection_string()}")
         self._output.setFocus()
+        if self._conn.id is not None:
+            self.health_changed.emit(self._conn.id, "connected")
         # Open SFTP in background 800 ms after connect (non-blocking)
         QTimer.singleShot(800, self._setup_sftp)
 
@@ -525,6 +537,8 @@ class TerminalWidget(QWidget):
         self._output.feed(f"\r\n\x1b[31m*** {msg} ***\x1b[0m\r\n".encode())
         self._reconnect_msg.setText(f"Connection lost: {msg}")
         self._reconnect_bar.show()
+        if self._conn.id is not None:
+            self.health_changed.emit(self._conn.id, "error")
         # Do NOT emit disconnected — keep the tab open for reconnect
 
     def _on_finished(self) -> None:
@@ -534,6 +548,8 @@ class TerminalWidget(QWidget):
             return  # reconnect bar is already shown — nothing else to do
         self._set_status("Session closed.")
         self._output.feed(b"\r\n[Session closed]\r\n")
+        if self._conn.id is not None:
+            self.health_changed.emit(self._conn.id, "disconnected")
         self.disconnected.emit("Session closed.")
 
     # ── Reconnect ─────────────────────────────────────────────────────────────
@@ -587,6 +603,8 @@ class TerminalWidget(QWidget):
         if self._thread:
             self._thread.quit()
             self._thread.wait(2000)
+        if self._conn.id is not None:
+            self.health_changed.emit(self._conn.id, "disconnected")
 
     def closeEvent(self, event) -> None:
         self.shutdown()

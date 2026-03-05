@@ -255,44 +255,41 @@ class MainWindow(QMainWindow):
 
     def _open_terminal(self, conn: Connection) -> None:
         """Open a new terminal tab for conn; switch to existing tab if already open."""
-        from src.ui.terminal_widget import TerminalWidget
+        from src.ui.split_view import SplitView
 
         # If a tab for this connection is already open, just switch to it
         if conn.id is not None:
             for i in range(1, self._tabs.count()):
                 w = self._tabs.widget(i)
-                if isinstance(w, TerminalWidget) and getattr(w._conn, "id", None) == conn.id:
+                if isinstance(w, SplitView) and w.matches_conn(conn):
                     self._tabs.setCurrentIndex(i)
                     return
 
-        terminal = TerminalWidget(conn, db=self.db, parent=self)
-        terminal.status_message.connect(self.set_status)
-        terminal.disconnected.connect(
-            lambda msg, t=terminal: self._on_terminal_disconnected(t, msg)
-        )
-        idx = self._tabs.addTab(terminal, f"🔑 {conn.display_name()}")
+        view = SplitView(conn, db=self.db, parent=self)
+        view.status_message.connect(self.set_status)
+        view.health_changed.connect(self._tree.set_health)
+        view.all_closed.connect(lambda v=view: self._on_split_view_closed(v))
+
+        idx = self._tabs.addTab(view, f"🔑 {conn.display_name()}")
         if conn.color:
             self._tabs.tabBar().setTabTextColor(idx, QColor(conn.color))
         self._tabs.setCurrentIndex(idx)
-        terminal.start_connection()
         self._track_recent(conn)
         self.set_status(f"Connecting to {conn.connection_string()}…")
 
-    def _on_terminal_disconnected(self, terminal, msg: str) -> None:
-        """Close the tab automatically when a session ends."""
-        self.set_status(msg)
-        idx = self._tabs.indexOf(terminal)
+    def _on_split_view_closed(self, view) -> None:
+        """Remove the tab when the last pane in a SplitView closes cleanly."""
+        idx = self._tabs.indexOf(view)
         if idx >= 0:
             self._tabs.removeTab(idx)
-            terminal.shutdown()
-            terminal.deleteLater()
+            view.deleteLater()
+        self.set_status("Session closed.")
 
     def _on_tab_close_requested(self, index: int) -> None:
         if index == 0:
             return  # home tab is permanent
-        from src.ui.terminal_widget import TerminalWidget
         widget = self._tabs.widget(index)
-        if isinstance(widget, TerminalWidget):
+        if hasattr(widget, "shutdown"):
             widget.shutdown()
         self._tabs.removeTab(index)
         if widget:
@@ -440,10 +437,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def closeEvent(self, event) -> None:
-        from src.ui.terminal_widget import TerminalWidget
         for i in range(1, self._tabs.count()):
             w = self._tabs.widget(i)
-            if isinstance(w, TerminalWidget):
+            if hasattr(w, "shutdown"):
                 w.shutdown()
         self.db.set_pref("window_geometry", self.saveGeometry().toHex().data().decode())
         super().closeEvent(event)
