@@ -69,6 +69,15 @@ _NAMED: dict[str, str] = {
 _ANSI_RE = re.compile(rb"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])")
 
 
+def _fmt_bytes(n: int) -> str:
+    """Format a byte count as a human-readable string."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1_048_576:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / 1_048_576:.1f} MB"
+
+
 # ── Colour helpers ────────────────────────────────────────────────────────────
 
 def _pyte_color(value: object, is_fg: bool) -> str:
@@ -197,6 +206,9 @@ class TerminalWidget(QWidget):
         self._sftp_worker = None
         self._had_error = False
         self._log_file  = None
+        self._bytes_rx: int = 0
+        self._bytes_tx: int = 0
+        self._stats_timer: Optional[QTimer] = None
         self._build_ui()
 
     # ── UI construction ──────────────────────────────────────────────────────
@@ -218,6 +230,13 @@ class TerminalWidget(QWidget):
         self._title_lbl.setStyleSheet("color: #ccc; font-size: 12px;")
         hbar.addWidget(self._title_lbl)
         hbar.addStretch()
+
+        # Byte counter (hidden until connected)
+        self._stats_lbl = QLabel("")
+        self._stats_lbl.setStyleSheet("color: #666; font-size: 11px; padding: 0 6px;")
+        self._stats_lbl.setToolTip("Bytes received / sent this session")
+        self._stats_lbl.hide()
+        hbar.addWidget(self._stats_lbl)
 
         # Search toggle
         btn_search = QPushButton("🔍")
@@ -508,6 +527,14 @@ class TerminalWidget(QWidget):
         self._output.setFocus()
         if self._conn.id is not None:
             self.health_changed.emit(self._conn.id, "connected")
+        # Start byte-counter ticker
+        self._bytes_rx = 0
+        self._bytes_tx = 0
+        self._stats_lbl.show()
+        self._stats_timer = QTimer(self)
+        self._stats_timer.setInterval(1000)
+        self._stats_timer.timeout.connect(self._update_stats)
+        self._stats_timer.start()
         # Open SFTP in background 800 ms after connect (non-blocking)
         QTimer.singleShot(800, self._setup_sftp)
 
@@ -522,7 +549,11 @@ class TerminalWidget(QWidget):
         self._sftp_worker.finished.connect(self._sftp_thread.quit)
         self._sftp_thread.start()
 
+    def _update_stats(self) -> None:
+        self._stats_lbl.setText(f"↓ {_fmt_bytes(self._bytes_rx)}  ↑ {_fmt_bytes(self._bytes_tx)}")
+
     def _on_data(self, raw: bytes) -> None:
+        self._bytes_rx += len(raw)
         self._output.feed(raw)
         if self._log_file:
             try:
@@ -544,6 +575,9 @@ class TerminalWidget(QWidget):
     def _on_finished(self) -> None:
         if self._thread:
             self._thread.quit()
+        if self._stats_timer:
+            self._stats_timer.stop()
+            self._stats_timer = None
         if self._had_error:
             return  # reconnect bar is already shown — nothing else to do
         self._set_status("Session closed.")
@@ -581,6 +615,7 @@ class TerminalWidget(QWidget):
     # ── Key / resize forwarding ───────────────────────────────────────────────
 
     def _on_key(self, data: bytes) -> None:
+        self._bytes_tx += len(data)
         if self._worker:
             self._worker.send(data)
 
@@ -592,6 +627,9 @@ class TerminalWidget(QWidget):
 
     def shutdown(self) -> None:
         """Gracefully stop the SSH session and worker thread."""
+        if self._stats_timer:
+            self._stats_timer.stop()
+            self._stats_timer = None
         if self._log_file:
             try:
                 self._log_file.close()

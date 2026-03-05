@@ -8,14 +8,57 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout, QToolBar,
     QStatusBar, QMenuBar, QMenu, QMessageBox, QApplication,
     QLineEdit, QLabel, QComboBox, QPushButton, QHBoxLayout,
-    QSizePolicy, QTabWidget, QTabBar,
+    QSizePolicy, QTabWidget, QTabBar, QSystemTrayIcon,
 )
-from PyQt6.QtGui import QAction, QColor, QKeySequence, QFont, QIcon
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QAction, QColor, QKeySequence, QFont, QIcon, QPixmap, QPainter
+from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal
 
 from src.storage.database import Database
 from src.models.connection import Connection
 
+
+# ── Detachable tab bar ────────────────────────────────────────────────────────
+
+class _DetachableTabBar(QTabBar):
+    """QTabBar that adds a right-click 'Open in New Window' context menu."""
+
+    detach_requested = pyqtSignal(int)   # tab index to detach
+
+    def contextMenuEvent(self, event) -> None:
+        idx = self.tabAt(event.pos())
+        if idx <= 0:          # 0 = Home tab (permanent), -1 = empty area
+            return
+        menu = QMenu(self)
+        act = QAction("Open in New Window", self)
+        act.triggered.connect(lambda: self.detach_requested.emit(idx))
+        menu.addAction(act)
+        menu.exec(event.globalPos())
+
+
+# ── Detached window ───────────────────────────────────────────────────────────
+
+class _DetachedWindow(QMainWindow):
+    """Standalone window that hosts a detached SplitView (or any widget)."""
+
+    def __init__(self, widget: QWidget, title: str,
+                 registry: list) -> None:
+        super().__init__()
+        self.setWindowTitle(title)
+        self.resize(900, 620)
+        self._registry = registry
+        self.setCentralWidget(widget)
+        registry.append(self)
+
+    def closeEvent(self, event) -> None:
+        w = self.centralWidget()
+        if hasattr(w, "shutdown"):
+            w.shutdown()
+        if self in self._registry:
+            self._registry.remove(self)
+        super().closeEvent(event)
+
+
+# ── Main window ───────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
     """Top-level application window (Remmina-style split layout)."""
@@ -23,6 +66,8 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database) -> None:
         super().__init__()
         self.db = db
+        self._detached_windows: list[_DetachedWindow] = []
+        self._fullscreen_active = False
 
         self.setWindowTitle("RemminaMac")
         self.setMinimumSize(960, 600)
@@ -32,6 +77,7 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_central()
         self._build_status_bar()
+        self._setup_tray()
 
         # Restore window geometry
         geom = db.get_pref("window_geometry")
@@ -101,6 +147,14 @@ class MainWindow(QMainWindow):
         self._act_toggle_tree.triggered.connect(self._on_toggle_tree)
         view_menu.addAction(self._act_toggle_tree)
 
+        view_menu.addSeparator()
+
+        self._act_fullscreen = QAction("&Fullscreen", self)
+        self._act_fullscreen.setShortcut(QKeySequence("Ctrl+Return"))  # Cmd+Enter on macOS
+        self._act_fullscreen.setCheckable(True)
+        self._act_fullscreen.triggered.connect(self._on_toggle_fullscreen)
+        view_menu.addAction(self._act_fullscreen)
+
         # Window
         win_menu: QMenu = mb.addMenu("&Window")
 
@@ -135,6 +189,7 @@ class MainWindow(QMainWindow):
         tb.setIconSize(QSize(18, 18))
         tb.setStyleSheet("QToolBar { spacing: 6px; padding: 4px 8px; }")
         self.addToolBar(tb)
+        self._toolbar = tb  # kept for fullscreen toggle
 
         # New / Edit / Delete buttons
         btn_new = QPushButton("＋ New")
@@ -204,10 +259,13 @@ class MainWindow(QMainWindow):
         self._tree.setMinimumWidth(220)
         self._splitter.addWidget(self._tree)
 
-        # Right panel: tab widget (home tab + terminal tabs)
+        # Right panel: tab widget with detachable tab bar
         self._tabs = QTabWidget()
         self._tabs.setTabsClosable(True)
         self._tabs.setMovable(True)
+        _tab_bar = _DetachableTabBar()
+        _tab_bar.detach_requested.connect(self._on_detach_tab)
+        self._tabs.setTabBar(_tab_bar)
         self._tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self._splitter.addWidget(self._tabs)
 
@@ -276,6 +334,8 @@ class MainWindow(QMainWindow):
         self._tabs.setCurrentIndex(idx)
         self._track_recent(conn)
         self.set_status(f"Connecting to {conn.connection_string()}…")
+        if hasattr(self, "_tray"):
+            self._refresh_tray_menu()
 
     def _on_split_view_closed(self, view) -> None:
         """Remove the tab when the last pane in a SplitView closes cleanly."""
@@ -433,6 +493,131 @@ class MainWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
+    # Fullscreen
+    # ------------------------------------------------------------------
+
+    def _on_toggle_fullscreen(self, checked: bool) -> None:
+        """Cmd+Enter — toggle fullscreen: hide/show toolbar, tree, and status bar."""
+        self._fullscreen_active = checked
+        self._act_fullscreen.setChecked(checked)
+        if checked:
+            self._toolbar.hide()
+            self._splitter.widget(0).hide()   # connection tree
+            self.statusBar().hide()
+            self.showFullScreen()
+        else:
+            self._toolbar.show()
+            if self._act_toggle_tree.isChecked():
+                self._splitter.widget(0).show()
+            self.statusBar().show()
+            self.showNormal()
+
+    # ------------------------------------------------------------------
+    # macOS tray icon
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_tray_icon() -> QIcon:
+        """Create a 22×22 '>_' terminal icon for the system tray."""
+        px = QPixmap(22, 22)
+        px.fill(Qt.GlobalColor.transparent)
+        p = QPainter(px)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(QColor("#1e1e1e"))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(1, 1, 20, 20, 4, 4)
+        p.setPen(QColor("#98c379"))
+        f = QFont("Menlo", 8)
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(QRect(0, 0, 22, 22), Qt.AlignmentFlag.AlignCenter, ">_")
+        p.end()
+        return QIcon(px)
+
+    def _setup_tray(self) -> None:
+        """Create and show the macOS menu-bar / system-tray icon."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        self._tray = QSystemTrayIcon(self._make_tray_icon(), self)
+        self._tray.setToolTip("RemminaMac")
+        self._tray.activated.connect(self._on_tray_activated)
+        self._tray_menu = QMenu()
+        self._tray.setContextMenu(self._tray_menu)
+        self._refresh_tray_menu()
+        self._tray.show()
+
+    def _refresh_tray_menu(self) -> None:
+        """Rebuild the tray context menu (called on show and after connection changes)."""
+        m = self._tray_menu
+        m.clear()
+
+        act_show = QAction("Show RemminaMac", self)
+        act_show.triggered.connect(self._bring_to_front)
+        m.addAction(act_show)
+
+        m.addSeparator()
+
+        # Quick connect field via dedicated action
+        act_qc = QAction("Quick Connect…", self)
+        act_qc.triggered.connect(self._on_tray_quick_connect)
+        m.addAction(act_qc)
+
+        # Recent connections submenu
+        raw = self.db.get_pref("recent_connections")
+        recent_ids: list[int] = json.loads(raw) if raw else []
+        if recent_ids:
+            recent_menu = m.addMenu("Recent Connections")
+            all_conns = {c.id: c for c in self.db.all_connections()}
+            for cid in recent_ids:
+                conn = all_conns.get(cid)
+                if conn:
+                    act = QAction(conn.display_name(), self)
+                    act.triggered.connect(
+                        lambda checked, c=conn: (self._bring_to_front(), self._open_terminal(c))
+                    )
+                    recent_menu.addAction(act)
+
+        m.addSeparator()
+        act_quit = QAction("Quit RemminaMac", self)
+        act_quit.triggered.connect(QApplication.quit)
+        m.addAction(act_quit)
+
+    def _bring_to_front(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _on_tray_activated(self, reason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if self.isVisible():
+                self.hide()
+            else:
+                self._bring_to_front()
+        elif reason == QSystemTrayIcon.ActivationReason.Context:
+            self._refresh_tray_menu()
+
+    def _on_tray_quick_connect(self) -> None:
+        self._bring_to_front()
+        self._qc_host.setFocus()
+        self._qc_host.selectAll()
+
+    # ------------------------------------------------------------------
+    # Detachable tabs
+    # ------------------------------------------------------------------
+
+    def _on_detach_tab(self, index: int) -> None:
+        """Pop a tab out into its own standalone window."""
+        if index <= 0:
+            return
+        widget = self._tabs.widget(index)
+        label  = self._tabs.tabText(index).strip()
+        if not widget:
+            return
+        self._tabs.removeTab(index)
+        widget.setParent(None)  # type: ignore[arg-type]
+        _DetachedWindow(widget, f"RemminaMac — {label}", self._detached_windows)
+
+    # ------------------------------------------------------------------
     # Close / persist state
     # ------------------------------------------------------------------
 
@@ -441,5 +626,9 @@ class MainWindow(QMainWindow):
             w = self._tabs.widget(i)
             if hasattr(w, "shutdown"):
                 w.shutdown()
+        for win in list(self._detached_windows):
+            win.close()
+        if hasattr(self, "_tray"):
+            self._tray.hide()
         self.db.set_pref("window_geometry", self.saveGeometry().toHex().data().decode())
         super().closeEvent(event)
