@@ -23,8 +23,16 @@ from __future__ import annotations
 
 import datetime
 import re
+import sys
 from pathlib import Path
 from typing import Optional
+
+_LINUX = sys.platform.startswith("linux")
+
+
+def _ico(emoji: str, text: str) -> str:
+    """Return plain text on Linux (emoji may not render), emoji elsewhere."""
+    return text if _LINUX else emoji
 
 import pyte
 from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal, QObject
@@ -100,6 +108,9 @@ def apply_terminal_theme(theme) -> None:
 
 # Strip ANSI escape codes from raw bytes (for session log)
 _ANSI_RE = re.compile(rb"\x1b(?:[@-Z\\-_]|\[[0-9;]*[ -/]*[@-~])")
+
+# OSC 7: shells that emit "file://hostname/path" CWD notifications
+_OSC7_RE = re.compile(rb"\x1b\]7;file://[^\x07/]*(/[^\x07]*)\x07")
 
 
 def _fmt_bytes(n: int) -> str:
@@ -243,6 +254,7 @@ class TerminalWidget(QWidget):
         self._bytes_rx: int = 0
         self._bytes_tx: int = 0
         self._stats_timer: Optional[QTimer] = None
+        self._remote_cwd: str = ""
         self._build_ui()
 
     # ── UI construction ──────────────────────────────────────────────────────
@@ -260,7 +272,9 @@ class TerminalWidget(QWidget):
         hbar.setContentsMargins(10, 0, 10, 0)
         hbar.setSpacing(4)
 
-        self._title_lbl = QLabel(f"🔑  {self._conn.connection_string()}")
+        self._title_lbl = QLabel(
+            f"{_ico('🔑  ', '')} {self._conn.connection_string()}"
+        )
         self._title_lbl.setStyleSheet("color: #ccc; font-size: 12px;")
         hbar.addWidget(self._title_lbl)
         hbar.addStretch()
@@ -273,7 +287,7 @@ class TerminalWidget(QWidget):
         hbar.addWidget(self._stats_lbl)
 
         # Search toggle
-        btn_search = QPushButton("🔍")
+        btn_search = QPushButton(_ico("🔍", "[/]"))
         btn_search.setToolTip("Search (Ctrl+F)")
         btn_search.setFixedSize(26, 26)
         btn_search.setStyleSheet(self._hdr_btn_style())
@@ -281,7 +295,7 @@ class TerminalWidget(QWidget):
         hbar.addWidget(btn_search)
 
         # Logging toggle
-        self._log_btn = QPushButton("⏺")
+        self._log_btn = QPushButton(_ico("⏺", "●"))
         self._log_btn.setToolTip("Start session logging")
         self._log_btn.setFixedSize(26, 26)
         self._log_btn.setStyleSheet(self._hdr_btn_style())
@@ -289,31 +303,31 @@ class TerminalWidget(QWidget):
         hbar.addWidget(self._log_btn)
 
         # Commands / snippets toggle
-        btn_cmds = QPushButton("⚡")
+        btn_cmds = QPushButton(_ico("⚡", "Cmd"))
         btn_cmds.setToolTip("Commands panel")
-        btn_cmds.setFixedSize(26, 26)
+        btn_cmds.setFixedSize(36 if _LINUX else 26, 26)
         btn_cmds.setStyleSheet(self._hdr_btn_style())
         btn_cmds.clicked.connect(lambda: self._show_side_tab(0))
         hbar.addWidget(btn_cmds)
 
         # SFTP toggle
-        btn_sftp = QPushButton("📁")
+        btn_sftp = QPushButton(_ico("📁", "SFTP"))
         btn_sftp.setToolTip("SFTP file browser")
-        btn_sftp.setFixedSize(26, 26)
+        btn_sftp.setFixedSize(40 if _LINUX else 26, 26)
         btn_sftp.setStyleSheet(self._hdr_btn_style())
         btn_sftp.clicked.connect(lambda: self._show_side_tab(1))
         hbar.addWidget(btn_sftp)
 
         # Tunnel panel toggle
-        btn_tunnels = QPushButton("🔀")
+        btn_tunnels = QPushButton(_ico("🔀", "Tun"))
         btn_tunnels.setToolTip("Port forwarding tunnels")
-        btn_tunnels.setFixedSize(26, 26)
+        btn_tunnels.setFixedSize(36 if _LINUX else 26, 26)
         btn_tunnels.setStyleSheet(self._hdr_btn_style())
         btn_tunnels.clicked.connect(lambda: self._show_side_tab(2))
         hbar.addWidget(btn_tunnels)
 
         # Split pane
-        btn_split = QPushButton("⊞")
+        btn_split = QPushButton(_ico("⊞", "[+]"))
         btn_split.setToolTip("Split pane — open a new terminal alongside this one")
         btn_split.setFixedSize(26, 26)
         btn_split.setStyleSheet(self._hdr_btn_style())
@@ -408,11 +422,11 @@ class TerminalWidget(QWidget):
         self._snippets_panel.send_command.connect(
             lambda cmd: self._on_key(cmd.encode("utf-8", errors="replace"))
         )
-        self._side_tabs.addTab(self._snippets_panel, "⚡ Commands")
+        self._side_tabs.addTab(self._snippets_panel, _ico("⚡ Commands", "Commands"))
 
         from src.ui.sftp_panel import SFTPPanel
         self._sftp_panel = SFTPPanel(self)
-        self._side_tabs.addTab(self._sftp_panel, "📁 SFTP")
+        self._side_tabs.addTab(self._sftp_panel, _ico("📁 SFTP", "SFTP"))
 
         from src.ui.tunnel_panel import TunnelPanel
         self._tunnel_panel = TunnelPanel(
@@ -420,7 +434,7 @@ class TerminalWidget(QWidget):
             conn_id=self._conn.id,
             parent=self,
         )
-        self._side_tabs.addTab(self._tunnel_panel, "🔀 Tunnels")
+        self._side_tabs.addTab(self._tunnel_panel, _ico("🔀 Tunnels", "Tunnels"))
 
         self._content_splitter.addWidget(self._side_panel)
         self._side_panel.hide()
@@ -517,7 +531,7 @@ class TerminalWidget(QWidget):
             except OSError:
                 pass
             self._log_file = None
-            self._log_btn.setText("⏺")
+            self._log_btn.setText(_ico("⏺", "●"))
             self._log_btn.setToolTip("Start session logging")
             self._set_status("Logging stopped.")
         else:
@@ -531,7 +545,7 @@ class TerminalWidget(QWidget):
             path = log_dir / f"{name}_{ts}.log"
             try:
                 self._log_file = open(path, "wb")  # noqa: WPS515
-                self._log_btn.setText("⏹")
+                self._log_btn.setText(_ico("⏹", "■"))
                 self._log_btn.setToolTip(f"Stop logging  ({path.name})")
                 self._set_status(f"Logging to {path.name}")
             except OSError as exc:
@@ -550,6 +564,9 @@ class TerminalWidget(QWidget):
             total = sum(sizes)
             if sizes[1] < 200:
                 self._content_splitter.setSizes([total - 280, 280])
+            # When opening SFTP panel, navigate to terminal's current directory
+            if index == 1 and self._remote_cwd:
+                self._sftp_panel.navigate_to(self._remote_cwd)
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
@@ -607,6 +624,13 @@ class TerminalWidget(QWidget):
     def _on_data(self, raw: bytes) -> None:
         self._bytes_rx += len(raw)
         self._output.feed(raw)
+        # Track remote CWD from OSC 7 escape sequences emitted by the shell
+        m = _OSC7_RE.search(raw)
+        if m:
+            try:
+                self._remote_cwd = m.group(1).decode("utf-8", errors="replace").rstrip("\x00")
+            except Exception:
+                pass
         if self._log_file:
             try:
                 self._log_file.write(_ANSI_RE.sub(b"", raw))

@@ -59,6 +59,11 @@ class SplitView(QWidget):
         """True when this view was opened for *conn* (by saved ID)."""
         return self._conn.id is not None and self._conn.id == conn.id
 
+    @property
+    def conn_info(self) -> str:
+        """Connection string shown in the status bar when this tab is active."""
+        return self._conn.connection_string()
+
     def get_terminals(self) -> list:
         """Return a snapshot of the current live TerminalWidget panes."""
         return list(self._terminals)

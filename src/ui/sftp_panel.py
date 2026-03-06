@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path, PurePosixPath
 from typing import Optional
+
+_LINUX = sys.platform.startswith("linux")
+
+
+def _ico(emoji: str, text: str) -> str:
+    return text if _LINUX else emoji
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
@@ -157,12 +164,12 @@ class SFTPPanel(QWidget):
 
         # Transfer buttons
         btn_row = QHBoxLayout()
-        self._btn_dl = QPushButton("⬇  Download")
+        self._btn_dl = QPushButton(_ico("⬇  Download", "Download"))
         self._btn_dl.setEnabled(False)
         self._btn_dl.clicked.connect(self._on_download)
         btn_row.addWidget(self._btn_dl)
 
-        self._btn_ul = QPushButton("⬆  Upload")
+        self._btn_ul = QPushButton(_ico("⬆  Upload", "Upload"))
         self._btn_ul.setEnabled(False)
         self._btn_ul.clicked.connect(self._on_upload)
         btn_row.addWidget(self._btn_ul)
@@ -193,6 +200,14 @@ class SFTPPanel(QWidget):
         self._btn_ul.setEnabled(True)
         self._refresh()
 
+    def navigate_to(self, path: str) -> None:
+        """Navigate the SFTP panel to *path* (the terminal's current directory)."""
+        if not path:
+            return
+        self._cwd = path
+        if self._sftp:
+            self._refresh()
+
     # ── Navigation ────────────────────────────────────────────────────────────
 
     def _refresh(self) -> None:
@@ -210,7 +225,7 @@ class SFTPPanel(QWidget):
         self._path_lbl.setText(self._cwd)
         self._list.clear()
         for name, is_dir, size in entries:
-            icon  = "📁" if is_dir else "📄"
+            icon  = _ico("📁", "[d]") if is_dir else _ico("📄", "[f]")
             extra = "" if is_dir else f"  ({_human(size)})"
             item  = QListWidgetItem(f"{icon}  {name}{extra}")
             item.setData(Qt.ItemDataRole.UserRole,     is_dir)

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Optional
+
+_LINUX = sys.platform.startswith("linux")
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
@@ -180,7 +183,8 @@ class ConnectionTree(QWidget):
                     g_item.setExpanded(True)
 
             c_item = QTreeWidgetItem()
-            c_item.setText(0, f"  🔑  {conn.display_name()}")
+            _prefix = "  " if _LINUX else "  🔑  "
+            c_item.setText(0, f"{_prefix}{conn.display_name()}")
             c_item.setText(1, conn.connection_string())
             c_item.setFlags(_CONN_FLAGS)
             c_item.setData(0, Qt.ItemDataRole.UserRole, conn)
@@ -244,7 +248,7 @@ class ConnectionTree(QWidget):
         menu = QMenu(self)
 
         if conn:
-            act_connect = QAction("⚡  Connect", self)
+            act_connect = QAction("Connect" if _LINUX else "⚡  Connect", self)
             act_connect.triggered.connect(lambda: self.connection_activated.emit(conn))
             menu.addAction(act_connect)
             menu.addSeparator()

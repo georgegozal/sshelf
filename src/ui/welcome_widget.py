@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
@@ -10,6 +11,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from src.models.connection import Connection
+
+_LINUX = sys.platform.startswith("linux")
+
+
+def _ico(emoji: str, text: str) -> str:
+    return text if _LINUX else emoji
 
 
 class WelcomeWidget(QWidget):
@@ -21,8 +28,8 @@ class WelcomeWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        icon = QLabel("🖥️")
-        icon.setStyleSheet("font-size: 64px;")
+        icon = QLabel(_ico("🖥️", "[SSH]"))
+        icon.setStyleSheet("font-size: 64px;" if not _LINUX else "font-size: 32px; font-weight: bold;")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         title = QLabel("RemminaMac")
@@ -50,7 +57,7 @@ class WelcomeWidget(QWidget):
                 hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 layout.addWidget(hdr)
                 for conn in recent:
-                    btn = QPushButton(f"🔑  {conn.display_name()}")
+                    btn = QPushButton(f"{_ico('🔑  ', '')} {conn.display_name()}")
                     btn.setFixedWidth(300)
                     btn.setStyleSheet(
                         "QPushButton { text-align: left; padding: 6px 12px;"
@@ -95,7 +102,7 @@ class DetailWidget(QWidget):
 
         # Title row
         title_row = QHBoxLayout()
-        icon = QLabel("🔑")
+        icon = QLabel(_ico("🔑", "SSH"))
         icon.setStyleSheet("font-size: 36px;")
         title_row.addWidget(icon)
 
@@ -146,7 +153,7 @@ class DetailWidget(QWidget):
         layout.addWidget(card)
 
         # Connect button — full width, prominent
-        btn = QPushButton("⚡   Connect")
+        btn = QPushButton(_ico("⚡   Connect", "Connect"))
         btn.setFixedHeight(48)
         btn.setStyleSheet(
             "QPushButton { font-size: 16px; font-weight: bold;"
