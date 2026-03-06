@@ -541,6 +541,40 @@ class MainWindow(QMainWindow):
         dlg = PreferencesDialog(self.db, self)
         if dlg.exec():
             self._apply_terminal_theme_from_prefs()
+            self._refresh_icons()
+
+    def _refresh_icons(self) -> None:
+        """
+        Re-apply freedesktop theme icons to all icon-bearing widgets after
+        the user has changed the icon theme in Preferences.
+
+        Covers: broadcast toolbar button, connection tree, and all open
+        terminal panes (via TerminalWidget.refresh_icons()).
+        Has no effect on non-Linux platforms.
+        """
+        if not _LINUX:
+            return
+        # Broadcast button
+        brd_icon = QIcon.fromTheme("network-wireless")
+        if not brd_icon.isNull():
+            self._btn_broadcast.setIcon(brd_icon)
+            self._btn_broadcast.setIconSize(QSize(16, 16))
+            self._btn_broadcast.setText("")
+        # Connection tree — reload() rebuilds all items with fresh icons
+        self._tree.reload()
+        # All open terminal panes
+        from src.ui.split_view import SplitView
+        for i in range(1, self._tabs.count()):
+            w = self._tabs.widget(i)
+            if isinstance(w, SplitView):
+                for t in w.get_terminals():
+                    t.refresh_icons()
+        # Detached windows
+        for win in self._detached_windows:
+            inner = win.centralWidget()
+            if isinstance(inner, SplitView):
+                for t in inner.get_terminals():
+                    t.refresh_icons()
 
     def _apply_terminal_theme_from_prefs(self) -> None:
         """Load the saved terminal theme pref and apply it to all open terminals."""

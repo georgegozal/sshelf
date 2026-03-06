@@ -357,13 +357,13 @@ class TerminalWidget(QWidget):
         hbar.addWidget(self._stats_lbl)
 
         # Search toggle (🔍 is emoji-range → use theme icon on Linux)
-        btn_search = QPushButton("" if _LINUX else "🔍")
-        btn_search.setToolTip("Search (Ctrl+F)")
-        btn_search.setFixedSize(26, 26)
-        btn_search.setStyleSheet(self._hdr_btn_style())
-        btn_search.clicked.connect(self._toggle_search)
-        _apply_icon(btn_search, "edit-find", "·/·")
-        hbar.addWidget(btn_search)
+        self._btn_search = QPushButton("" if _LINUX else "🔍")
+        self._btn_search.setToolTip("Search (Ctrl+F)")
+        self._btn_search.setFixedSize(26, 26)
+        self._btn_search.setStyleSheet(self._hdr_btn_style())
+        self._btn_search.clicked.connect(self._toggle_search)
+        _apply_icon(self._btn_search, "edit-find", "·/·")
+        hbar.addWidget(self._btn_search)
 
         # Logging toggle (⏺ may not render in all Linux fonts → use theme icon)
         self._log_btn = QPushButton("" if _LINUX else "⏺")
@@ -375,31 +375,31 @@ class TerminalWidget(QWidget):
         hbar.addWidget(self._log_btn)
 
         # Commands / snippets toggle (⚡ is BMP, but system-run is cleaner on Linux)
-        btn_cmds = QPushButton("" if _LINUX else "⚡")
-        btn_cmds.setToolTip("Commands panel")
-        btn_cmds.setFixedSize(26, 26)
-        btn_cmds.setStyleSheet(self._hdr_btn_style())
-        btn_cmds.clicked.connect(lambda: self._show_side_tab(0))
-        _apply_icon(btn_cmds, "system-run", "⚡")
-        hbar.addWidget(btn_cmds)
+        self._btn_cmds = QPushButton("" if _LINUX else "⚡")
+        self._btn_cmds.setToolTip("Commands panel")
+        self._btn_cmds.setFixedSize(26, 26)
+        self._btn_cmds.setStyleSheet(self._hdr_btn_style())
+        self._btn_cmds.clicked.connect(lambda: self._show_side_tab(0))
+        _apply_icon(self._btn_cmds, "system-run", "⚡")
+        hbar.addWidget(self._btn_cmds)
 
         # SFTP toggle (📁 is emoji → folder theme icon)
-        btn_sftp = QPushButton("" if _LINUX else "📁")
-        btn_sftp.setToolTip("SFTP file browser")
-        btn_sftp.setFixedSize(26, 26)
-        btn_sftp.setStyleSheet(self._hdr_btn_style())
-        btn_sftp.clicked.connect(lambda: self._show_side_tab(1))
-        _apply_icon(btn_sftp, "folder", "/")
-        hbar.addWidget(btn_sftp)
+        self._btn_sftp = QPushButton("" if _LINUX else "📁")
+        self._btn_sftp.setToolTip("SFTP file browser")
+        self._btn_sftp.setFixedSize(26, 26)
+        self._btn_sftp.setStyleSheet(self._hdr_btn_style())
+        self._btn_sftp.clicked.connect(lambda: self._show_side_tab(1))
+        _apply_icon(self._btn_sftp, "folder", "/")
+        hbar.addWidget(self._btn_sftp)
 
         # Tunnel panel toggle (🔀 is emoji → network icon)
-        btn_tunnels = QPushButton("" if _LINUX else "🔀")
-        btn_tunnels.setToolTip("Port forwarding tunnels")
-        btn_tunnels.setFixedSize(26, 26)
-        btn_tunnels.setStyleSheet(self._hdr_btn_style())
-        btn_tunnels.clicked.connect(lambda: self._show_side_tab(2))
-        _apply_icon(btn_tunnels, "network-transmit-receive", "⇄")
-        hbar.addWidget(btn_tunnels)
+        self._btn_tunnels = QPushButton("" if _LINUX else "🔀")
+        self._btn_tunnels.setToolTip("Port forwarding tunnels")
+        self._btn_tunnels.setFixedSize(26, 26)
+        self._btn_tunnels.setStyleSheet(self._hdr_btn_style())
+        self._btn_tunnels.clicked.connect(lambda: self._show_side_tab(2))
+        _apply_icon(self._btn_tunnels, "network-transmit-receive", "⇄")
+        hbar.addWidget(self._btn_tunnels)
 
         # Split pane (⊞ is BMP U+229E — renders fine in standard Linux fonts)
         btn_split = QPushButton("⊞")
@@ -679,6 +679,30 @@ class TerminalWidget(QWidget):
                     self._detect_cwd_async()
                 elif self._remote_cwd:
                     self._sftp_panel.navigate_to(self._remote_cwd)
+
+    def refresh_icons(self) -> None:
+        """
+        Re-apply header button icons from the current freedesktop icon theme.
+
+        Called by MainWindow after the user changes the icon theme in
+        Preferences so that already-open terminal panes update immediately.
+        Has no effect on non-Linux platforms.
+        """
+        if not _LINUX:
+            return
+        _apply_icon(self._btn_search, "edit-find", "·/·")
+        # Only refresh the log button back to "record" if not currently logging
+        if not self._log_file:
+            _apply_icon(self._log_btn, "media-record", "●")
+        else:
+            _apply_icon(self._log_btn, "media-playback-stop", "■")
+        _apply_icon(self._btn_cmds,    "system-run",                "⚡")
+        _apply_icon(self._btn_sftp,    "folder",                    "/")
+        _apply_icon(self._btn_tunnels, "network-transmit-receive",  "⇄")
+        # Refresh side-panel tab icons
+        self._side_tabs.setTabIcon(0, QIcon.fromTheme("system-run"))
+        self._side_tabs.setTabIcon(1, QIcon.fromTheme("folder"))
+        self._side_tabs.setTabIcon(2, QIcon.fromTheme("network-transmit-receive"))
 
     def _detect_cwd_async(self) -> None:
         """Open an exec channel in the background to detect the shell's CWD."""

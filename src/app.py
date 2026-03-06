@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import sys
 from PyQt6.QtWidgets import QApplication, QStyleFactory
-from PyQt6.QtGui import QFont, QPalette, QColor
+from PyQt6.QtGui import QFont, QPalette, QColor, QIcon
 from PyQt6.QtCore import Qt
+
+_LINUX = sys.platform.startswith("linux")
 
 
 class Application(QApplication):
@@ -32,6 +34,20 @@ class Application(QApplication):
     # ------------------------------------------------------------------
     # Theme
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def apply_icon_theme(name: str) -> None:
+        """
+        Switch the freedesktop icon theme (Linux only).
+
+        *name* is a theme directory name such as "Papirus", "Adwaita", or
+        "hicolor".  Pass an empty string to keep whatever the desktop
+        environment chose automatically.
+        """
+        if not _LINUX:
+            return
+        if name:
+            QIcon.setThemeName(name)
 
     @staticmethod
     def apply_theme(theme: str) -> None:
@@ -76,6 +92,9 @@ class Application(QApplication):
 
         self._db = Database()
         self.apply_theme(self._db.get_pref("app_theme", "system"))
+        # Apply saved icon theme BEFORE building the main window so all
+        # QIcon.fromTheme() calls pick it up from the start.
+        self.apply_icon_theme(self._db.get_pref("icon_theme", ""))
         self._main_window = MainWindow(self._db)
         self._main_window.show()
 
