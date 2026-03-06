@@ -194,6 +194,57 @@ class _Screen(pyte.HistoryScreen):
             self.in_alt_screen = False
 
 
+# ── CWD detection worker ──────────────────────────────────────────────────────
+
+class _GetCwdWorker(QObject):
+    """
+    Opens a short-lived exec channel on the existing SSH transport and runs a
+    shell one-liner that finds the interactive shell's CWD via /proc.
+
+    Strategy: the exec channel's parent process (PPID) is the same sshd child
+    that also spawned the interactive shell, so the shell is a sibling — we
+    list /proc entries whose PPid matches ours and whose name is a known shell.
+    """
+
+    cwd_found = pyqtSignal(str)
+    finished  = pyqtSignal()
+
+    # Shell one-liner: find sibling shell process → readlink its /proc cwd
+    _CMD = (
+        "for pid in $(ls /proc 2>/dev/null | grep '^[0-9]'); do"
+        " ppid=$(awk '/^PPid:/{print $2}' /proc/$pid/status 2>/dev/null);"
+        " [ \"$ppid\" = \"$PPID\" ] || continue;"
+        " comm=$(cat /proc/$pid/comm 2>/dev/null);"
+        " case \"$comm\" in bash|zsh|sh|fish|dash|-bash|-zsh)"
+        "   cwd=$(readlink /proc/$pid/cwd 2>/dev/null);"
+        "   [ -n \"$cwd\" ] && echo \"$cwd\" && exit 0;;"
+        " esac; done; echo $HOME"
+    )
+
+    def __init__(self, worker: SSHWorker) -> None:
+        super().__init__()
+        self._worker = worker
+
+    def run(self) -> None:
+        cwd = ""
+        try:
+            transport = self._worker.get_transport()
+            if transport:
+                chan = transport.open_session()
+                chan.settimeout(5)
+                chan.exec_command(self._CMD)
+                out = chan.makefile("r")
+                line = out.readline()
+                cwd = line.strip() if line else ""
+                chan.close()
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            if cwd:
+                self.cwd_found.emit(cwd)
+            self.finished.emit()
+
+
 # ── SFTP setup worker ─────────────────────────────────────────────────────────
 
 class _OpenSFTPWorker(QObject):
@@ -255,6 +306,8 @@ class TerminalWidget(QWidget):
         self._bytes_tx: int = 0
         self._stats_timer: Optional[QTimer] = None
         self._remote_cwd: str = ""
+        self._cwd_thread: Optional[QThread] = None
+        self._cwd_worker = None
         self._build_ui()
 
     # ── UI construction ──────────────────────────────────────────────────────
@@ -564,9 +617,31 @@ class TerminalWidget(QWidget):
             total = sum(sizes)
             if sizes[1] < 200:
                 self._content_splitter.setSizes([total - 280, 280])
-            # When opening SFTP panel, navigate to terminal's current directory
-            if index == 1 and self._remote_cwd:
-                self._sftp_panel.navigate_to(self._remote_cwd)
+            # When opening SFTP panel: navigate to the terminal's current directory.
+            # OSC 7 (emitted by well-configured shells) is instant; exec-channel
+            # detection is the reliable fallback for any Linux server.
+            if index == 1:
+                if self._remote_cwd:
+                    self._sftp_panel.navigate_to(self._remote_cwd)
+                elif self._worker:
+                    self._detect_cwd_async()
+
+    def _detect_cwd_async(self) -> None:
+        """Open an exec channel in the background to detect the shell's CWD."""
+        if self._cwd_thread and self._cwd_thread.isRunning():
+            return
+        self._cwd_thread = QThread(self)
+        self._cwd_worker = _GetCwdWorker(self._worker)
+        self._cwd_worker.moveToThread(self._cwd_thread)
+        self._cwd_thread.started.connect(self._cwd_worker.run)
+        self._cwd_worker.cwd_found.connect(self._on_cwd_detected)
+        self._cwd_worker.finished.connect(self._cwd_thread.quit)
+        self._cwd_thread.start()
+
+    def _on_cwd_detected(self, cwd: str) -> None:
+        """Called when the exec-channel CWD probe finishes."""
+        self._remote_cwd = cwd
+        self._sftp_panel.navigate_to(cwd)
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
@@ -686,6 +761,7 @@ class TerminalWidget(QWidget):
         self._worker = None
         self._thread = None
 
+        self._remote_cwd = ""
         self._output.feed(b"\r\n\x1b[33m[Reconnecting\xe2\x80\xa6]\x1b[0m\r\n")
         self.start_connection()
 
