@@ -117,19 +117,28 @@ class PreferencesDialog(QDialog):
 
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Apply |
             QDialogButtonBox.StandardButton.Cancel
         )
         btns.accepted.connect(self._save)
         btns.rejected.connect(self.reject)
+        btns.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self._apply)
         layout.addWidget(btns)
 
-    def _save(self) -> None:
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _apply(self) -> None:
+        """Persist all settings and apply them immediately — dialog stays open."""
         self.db.set_pref("terminal_font_size", str(self._font_size.value()))
         self.db.set_pref("default_keep_alive", str(self._keep_alive.value()))
         self.db.set_pref("confirm_delete", "1" if self._confirm_delete.isChecked() else "0")
+
         theme = ["system", "light", "dark"][self._theme.currentIndex()]
         self.db.set_pref("app_theme", theme)
         Application.apply_theme(theme)
+
         terminal_theme_name = self._terminal_theme.currentText()
         self.db.set_pref("terminal_theme", terminal_theme_name)
 
@@ -140,4 +149,15 @@ class PreferencesDialog(QDialog):
             self.db.set_pref("icon_theme", it_name)
             Application.apply_icon_theme(it_name)
 
+        # Ask the main window to refresh terminal colours and icons
+        win = self.parent()
+        if win is not None:
+            if hasattr(win, "_apply_terminal_theme_from_prefs"):
+                win._apply_terminal_theme_from_prefs()
+            if hasattr(win, "_refresh_icons"):
+                win._refresh_icons()
+
+    def _save(self) -> None:
+        """Apply all settings and close the dialog (OK button)."""
+        self._apply()
         self.accept()

@@ -538,10 +538,9 @@ class MainWindow(QMainWindow):
 
     def _on_preferences(self) -> None:
         from src.ui.preferences_dialog import PreferencesDialog
-        dlg = PreferencesDialog(self.db, self)
-        if dlg.exec():
-            self._apply_terminal_theme_from_prefs()
-            self._refresh_icons()
+        # PreferencesDialog._apply() already calls _apply_terminal_theme_from_prefs()
+        # and _refresh_icons() on self (the parent), so no extra work needed here.
+        PreferencesDialog(self.db, self).exec()
 
     def _refresh_icons(self) -> None:
         """
