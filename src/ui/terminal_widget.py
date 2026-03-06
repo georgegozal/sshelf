@@ -34,10 +34,27 @@ def _ico(emoji: str, text: str) -> str:
     """Return plain text on Linux (emoji may not render), emoji elsewhere."""
     return text if _LINUX else emoji
 
+
+def _apply_icon(btn, icon_name: str, text_fallback: str = "", size: int = 16) -> None:
+    """
+    On Linux set a freedesktop theme icon on *btn* (replacing its text).
+    Falls back to *text_fallback* when the icon is not in the current theme.
+    On macOS this is a no-op (emoji text is already set on the button).
+    """
+    if not _LINUX:
+        return
+    icon = QIcon.fromTheme(icon_name)
+    if not icon.isNull():
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(size, size))
+        btn.setText("")
+    elif text_fallback:
+        btn.setText(text_fallback)
+
 import pyte
-from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal, QObject
+from PyQt6.QtCore import QEvent, Qt, QThread, QTimer, pyqtSignal, QObject, QSize
 from PyQt6.QtGui import (
-    QColor, QFont, QFontMetrics, QKeyEvent, QPalette,
+    QColor, QFont, QFontMetrics, QIcon, QKeyEvent, QPalette,
     QTextCharFormat, QTextCursor, QTextDocument,
 )
 from PyQt6.QtWidgets import (
@@ -326,7 +343,7 @@ class TerminalWidget(QWidget):
         hbar.setSpacing(4)
 
         self._title_lbl = QLabel(
-            f"{_ico('🔑  ', '')} {self._conn.connection_string()}"
+            f"{'🔑  ' if not _LINUX else ''}{self._conn.connection_string()}"
         )
         self._title_lbl.setStyleSheet("color: #ccc; font-size: 12px;")
         hbar.addWidget(self._title_lbl)
@@ -339,48 +356,53 @@ class TerminalWidget(QWidget):
         self._stats_lbl.hide()
         hbar.addWidget(self._stats_lbl)
 
-        # Search toggle
-        btn_search = QPushButton(_ico("🔍", "[/]"))
+        # Search toggle (🔍 is emoji-range → use theme icon on Linux)
+        btn_search = QPushButton("" if _LINUX else "🔍")
         btn_search.setToolTip("Search (Ctrl+F)")
         btn_search.setFixedSize(26, 26)
         btn_search.setStyleSheet(self._hdr_btn_style())
         btn_search.clicked.connect(self._toggle_search)
+        _apply_icon(btn_search, "edit-find", "·/·")
         hbar.addWidget(btn_search)
 
-        # Logging toggle
-        self._log_btn = QPushButton(_ico("⏺", "●"))
+        # Logging toggle (⏺ may not render in all Linux fonts → use theme icon)
+        self._log_btn = QPushButton("" if _LINUX else "⏺")
         self._log_btn.setToolTip("Start session logging")
         self._log_btn.setFixedSize(26, 26)
         self._log_btn.setStyleSheet(self._hdr_btn_style())
         self._log_btn.clicked.connect(self._toggle_logging)
+        _apply_icon(self._log_btn, "media-record", "●")
         hbar.addWidget(self._log_btn)
 
-        # Commands / snippets toggle
-        btn_cmds = QPushButton(_ico("⚡", "Cmd"))
+        # Commands / snippets toggle (⚡ is BMP, but system-run is cleaner on Linux)
+        btn_cmds = QPushButton("" if _LINUX else "⚡")
         btn_cmds.setToolTip("Commands panel")
-        btn_cmds.setFixedSize(36 if _LINUX else 26, 26)
+        btn_cmds.setFixedSize(26, 26)
         btn_cmds.setStyleSheet(self._hdr_btn_style())
         btn_cmds.clicked.connect(lambda: self._show_side_tab(0))
+        _apply_icon(btn_cmds, "system-run", "⚡")
         hbar.addWidget(btn_cmds)
 
-        # SFTP toggle
-        btn_sftp = QPushButton(_ico("📁", "SFTP"))
+        # SFTP toggle (📁 is emoji → folder theme icon)
+        btn_sftp = QPushButton("" if _LINUX else "📁")
         btn_sftp.setToolTip("SFTP file browser")
-        btn_sftp.setFixedSize(40 if _LINUX else 26, 26)
+        btn_sftp.setFixedSize(26, 26)
         btn_sftp.setStyleSheet(self._hdr_btn_style())
         btn_sftp.clicked.connect(lambda: self._show_side_tab(1))
+        _apply_icon(btn_sftp, "folder", "/")
         hbar.addWidget(btn_sftp)
 
-        # Tunnel panel toggle
-        btn_tunnels = QPushButton(_ico("🔀", "Tun"))
+        # Tunnel panel toggle (🔀 is emoji → network icon)
+        btn_tunnels = QPushButton("" if _LINUX else "🔀")
         btn_tunnels.setToolTip("Port forwarding tunnels")
-        btn_tunnels.setFixedSize(36 if _LINUX else 26, 26)
+        btn_tunnels.setFixedSize(26, 26)
         btn_tunnels.setStyleSheet(self._hdr_btn_style())
         btn_tunnels.clicked.connect(lambda: self._show_side_tab(2))
+        _apply_icon(btn_tunnels, "network-transmit-receive", "⇄")
         hbar.addWidget(btn_tunnels)
 
-        # Split pane
-        btn_split = QPushButton(_ico("⊞", "[+]"))
+        # Split pane (⊞ is BMP U+229E — renders fine in standard Linux fonts)
+        btn_split = QPushButton("⊞")
         btn_split.setToolTip("Split pane — open a new terminal alongside this one")
         btn_split.setFixedSize(26, 26)
         btn_split.setStyleSheet(self._hdr_btn_style())
@@ -475,11 +497,25 @@ class TerminalWidget(QWidget):
         self._snippets_panel.send_command.connect(
             lambda cmd: self._on_key(cmd.encode("utf-8", errors="replace"))
         )
-        self._side_tabs.addTab(self._snippets_panel, _ico("⚡ Commands", "Commands"))
+        if _LINUX:
+            self._side_tabs.addTab(
+                self._snippets_panel,
+                QIcon.fromTheme("system-run"),
+                "Commands",
+            )
+        else:
+            self._side_tabs.addTab(self._snippets_panel, "⚡ Commands")
 
         from src.ui.sftp_panel import SFTPPanel
         self._sftp_panel = SFTPPanel(self)
-        self._side_tabs.addTab(self._sftp_panel, _ico("📁 SFTP", "SFTP"))
+        if _LINUX:
+            self._side_tabs.addTab(
+                self._sftp_panel,
+                QIcon.fromTheme("folder"),
+                "SFTP",
+            )
+        else:
+            self._side_tabs.addTab(self._sftp_panel, "📁 SFTP")
 
         from src.ui.tunnel_panel import TunnelPanel
         self._tunnel_panel = TunnelPanel(
@@ -487,7 +523,14 @@ class TerminalWidget(QWidget):
             conn_id=self._conn.id,
             parent=self,
         )
-        self._side_tabs.addTab(self._tunnel_panel, _ico("🔀 Tunnels", "Tunnels"))
+        if _LINUX:
+            self._side_tabs.addTab(
+                self._tunnel_panel,
+                QIcon.fromTheme("network-transmit-receive"),
+                "Tunnels",
+            )
+        else:
+            self._side_tabs.addTab(self._tunnel_panel, "🔀 Tunnels")
 
         self._content_splitter.addWidget(self._side_panel)
         self._side_panel.hide()
@@ -584,7 +627,12 @@ class TerminalWidget(QWidget):
             except OSError:
                 pass
             self._log_file = None
-            self._log_btn.setText(_ico("⏺", "●"))
+            # Restore "start recording" icon/text
+            if _LINUX:
+                _apply_icon(self._log_btn, "media-record", "●")
+            else:
+                self._log_btn.setIcon(QIcon())
+                self._log_btn.setText("⏺")
             self._log_btn.setToolTip("Start session logging")
             self._set_status("Logging stopped.")
         else:
@@ -598,7 +646,12 @@ class TerminalWidget(QWidget):
             path = log_dir / f"{name}_{ts}.log"
             try:
                 self._log_file = open(path, "wb")  # noqa: WPS515
-                self._log_btn.setText(_ico("⏹", "■"))
+                # Switch to "stop recording" icon/text
+                if _LINUX:
+                    _apply_icon(self._log_btn, "media-playback-stop", "■")
+                else:
+                    self._log_btn.setIcon(QIcon())
+                    self._log_btn.setText("⏹")
                 self._log_btn.setToolTip(f"Stop logging  ({path.name})")
                 self._set_status(f"Logging to {path.name}")
             except OSError as exc:
@@ -617,14 +670,15 @@ class TerminalWidget(QWidget):
             total = sum(sizes)
             if sizes[1] < 200:
                 self._content_splitter.setSizes([total - 280, 280])
-            # When opening SFTP panel: navigate to the terminal's current directory.
-            # OSC 7 (emitted by well-configured shells) is instant; exec-channel
-            # detection is the reliable fallback for any Linux server.
+            # When opening SFTP panel: always detect the shell's current directory
+            # fresh (so cd + re-open SFTP always shows the right directory).
+            # OSC 7 updates _remote_cwd instantly if the shell emits it; the
+            # exec-channel probe is the reliable fallback for any server.
             if index == 1:
-                if self._remote_cwd:
-                    self._sftp_panel.navigate_to(self._remote_cwd)
-                elif self._worker:
+                if self._worker:
                     self._detect_cwd_async()
+                elif self._remote_cwd:
+                    self._sftp_panel.navigate_to(self._remote_cwd)
 
     def _detect_cwd_async(self) -> None:
         """Open an exec channel in the background to detect the shell's CWD."""

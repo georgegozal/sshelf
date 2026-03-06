@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QFileDialog,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt6.QtGui import QIcon
 
 
 # ── Background workers ────────────────────────────────────────────────────────
@@ -164,12 +165,12 @@ class SFTPPanel(QWidget):
 
         # Transfer buttons
         btn_row = QHBoxLayout()
-        self._btn_dl = QPushButton(_ico("⬇  Download", "Download"))
+        self._btn_dl = QPushButton("⬇  Download")
         self._btn_dl.setEnabled(False)
         self._btn_dl.clicked.connect(self._on_download)
         btn_row.addWidget(self._btn_dl)
 
-        self._btn_ul = QPushButton(_ico("⬆  Upload", "Upload"))
+        self._btn_ul = QPushButton("⬆  Upload")
         self._btn_ul.setEnabled(False)
         self._btn_ul.clicked.connect(self._on_upload)
         btn_row.addWidget(self._btn_ul)
@@ -224,10 +225,22 @@ class SFTPPanel(QWidget):
     def _on_list_done(self, entries: list) -> None:
         self._path_lbl.setText(self._cwd)
         self._list.clear()
+        # Resolve theme icons once (falls back to None if not available)
+        _icon_dir  = QIcon.fromTheme("folder") if _LINUX else None
+        _icon_file = QIcon.fromTheme("text-x-generic") if _LINUX else None
         for name, is_dir, size in entries:
-            icon  = _ico("📁", "[d]") if is_dir else _ico("📄", "[f]")
             extra = "" if is_dir else f"  ({_human(size)})"
-            item  = QListWidgetItem(f"{icon}  {name}{extra}")
+            if _LINUX:
+                item = QListWidgetItem(f"{name}{extra}")
+                theme_icon = _icon_dir if is_dir else _icon_file
+                if theme_icon and not theme_icon.isNull():
+                    item.setIcon(theme_icon)
+                else:
+                    # Fallback: prepend short ASCII prefix
+                    item.setText(f"{'[d]' if is_dir else '[f]'}  {name}{extra}")
+            else:
+                emoji = "📁" if is_dir else "📄"
+                item = QListWidgetItem(f"{emoji}  {name}{extra}")
             item.setData(Qt.ItemDataRole.UserRole,     is_dir)
             item.setData(Qt.ItemDataRole.UserRole + 1, name)
             self._list.addItem(item)

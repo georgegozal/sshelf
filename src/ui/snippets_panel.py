@@ -81,7 +81,7 @@ class SnippetsPanel(QWidget):
         layout.addWidget(self._list)
 
         # Send button
-        btn_send = QPushButton("Send" if _LINUX else "⚡  Send")
+        btn_send = QPushButton("⚡  Send")
         btn_send.setStyleSheet(
             "QPushButton { background: #2563eb; color: white; border-radius: 4px;"
             " border: none; padding: 4px; }"

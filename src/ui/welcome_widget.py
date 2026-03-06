@@ -8,7 +8,8 @@ import sys
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QIcon
 
 from src.models.connection import Connection
 
@@ -28,8 +29,18 @@ class WelcomeWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        icon = QLabel(_ico("🖥️", "[SSH]"))
-        icon.setStyleSheet("font-size: 64px;" if not _LINUX else "font-size: 32px; font-weight: bold;")
+        if _LINUX:
+            # Use a theme icon displayed as a large pixmap label
+            _term_icon = QIcon.fromTheme("utilities-terminal")
+            if not _term_icon.isNull():
+                icon = QLabel()
+                icon.setPixmap(_term_icon.pixmap(QSize(64, 64)))
+            else:
+                icon = QLabel("[SSH]")
+                icon.setStyleSheet("font-size: 32px; font-weight: bold;")
+        else:
+            icon = QLabel("🖥️")
+            icon.setStyleSheet("font-size: 64px;")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         title = QLabel("RemminaMac")
@@ -56,8 +67,12 @@ class WelcomeWidget(QWidget):
                 hdr.setStyleSheet("font-size: 13px; font-weight: bold; color: palette(mid);")
                 hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 layout.addWidget(hdr)
+                _key_icon = QIcon.fromTheme("dialog-password") if _LINUX else QIcon()
                 for conn in recent:
-                    btn = QPushButton(f"{_ico('🔑  ', '')} {conn.display_name()}")
+                    btn = QPushButton(f"{'🔑  ' if not _LINUX else ''}{conn.display_name()}")
+                    if _LINUX and not _key_icon.isNull():
+                        btn.setIcon(_key_icon)
+                        btn.setIconSize(QSize(16, 16))
                     btn.setFixedWidth(300)
                     btn.setStyleSheet(
                         "QPushButton { text-align: left; padding: 6px 12px;"
@@ -102,8 +117,17 @@ class DetailWidget(QWidget):
 
         # Title row
         title_row = QHBoxLayout()
-        icon = QLabel(_ico("🔑", "SSH"))
-        icon.setStyleSheet("font-size: 36px;")
+        if _LINUX:
+            _key_ico = QIcon.fromTheme("dialog-password")
+            icon = QLabel()
+            if not _key_ico.isNull():
+                icon.setPixmap(_key_ico.pixmap(QSize(32, 32)))
+            else:
+                icon.setText("SSH")
+                icon.setStyleSheet("font-size: 18px;")
+        else:
+            icon = QLabel("🔑")
+            icon.setStyleSheet("font-size: 36px;")
         title_row.addWidget(icon)
 
         name_lbl = QLabel(self._conn.display_name())
@@ -153,7 +177,7 @@ class DetailWidget(QWidget):
         layout.addWidget(card)
 
         # Connect button — full width, prominent
-        btn = QPushButton(_ico("⚡   Connect", "Connect"))
+        btn = QPushButton("⚡   Connect")
         btn.setFixedHeight(48)
         btn.setStyleSheet(
             "QPushButton { font-size: 16px; font-weight: bold;"

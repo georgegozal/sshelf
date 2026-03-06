@@ -118,7 +118,9 @@ class MainWindow(QMainWindow):
         act_import.triggered.connect(self._on_import_ssh_config)
         file_menu.addAction(act_import)
 
-        act_keygen = QAction(_ico("🔑 ", "") + "&Generate SSH Key…", self)
+        act_keygen = QAction("🔑 &Generate SSH Key…" if not _LINUX else "&Generate SSH Key…", self)
+        if _LINUX:
+            act_keygen.setIcon(QIcon.fromTheme("dialog-password"))
         act_keygen.triggered.connect(self._on_generate_key)
         file_menu.addAction(act_keygen)
 
@@ -239,7 +241,7 @@ class MainWindow(QMainWindow):
         self._qc_host.returnPressed.connect(self._on_quick_connect)
         tb.addWidget(self._qc_host)
 
-        btn_go = QPushButton(_ico("⚡ Connect", "Connect"))
+        btn_go = QPushButton("⚡ Connect")
         btn_go.setToolTip("Open quick SSH connection")
         btn_go.clicked.connect(self._on_quick_connect)
         tb.addWidget(btn_go)
@@ -249,8 +251,8 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tb.addWidget(spacer)
 
-        # Broadcast toggle
-        self._btn_broadcast = QPushButton(_ico("📡", "Brd"))
+        # Broadcast toggle (📡 is emoji → use network-wireless theme icon on Linux)
+        self._btn_broadcast = QPushButton("" if _LINUX else "📡")
         self._btn_broadcast.setToolTip("Broadcast input to all terminal panes (off)")
         self._btn_broadcast.setCheckable(True)
         self._btn_broadcast.setFixedSize(28, 28)
@@ -259,12 +261,19 @@ class MainWindow(QMainWindow):
             "QPushButton:checked{color:#e5c07b;}"
             "QPushButton:hover{color:#fff;}"
         )
+        if _LINUX:
+            _brd_icon = QIcon.fromTheme("network-wireless")
+            if not _brd_icon.isNull():
+                self._btn_broadcast.setIcon(_brd_icon)
+                self._btn_broadcast.setIconSize(QSize(16, 16))
+            else:
+                self._btn_broadcast.setText("~")
         self._btn_broadcast.toggled.connect(self._on_broadcast_toggled)
         tb.addWidget(self._btn_broadcast)
         self._broadcast_active = False
 
         self._search_box = QLineEdit()
-        self._search_box.setPlaceholderText(_ico("🔍  Search connections…", "Search connections…"))
+        self._search_box.setPlaceholderText("Search connections…")
         self._search_box.setFixedWidth(200)
         self._search_box.setClearButtonEnabled(True)
         self._search_box.textChanged.connect(self._on_search)
@@ -359,7 +368,8 @@ class MainWindow(QMainWindow):
         view.health_changed.connect(self._tree.set_health)
         view.all_closed.connect(lambda v=view: self._on_split_view_closed(v))
 
-        idx = self._tabs.addTab(view, f"{_ico('🔑 ', '')}{conn.display_name()}")
+        tab_icon = QIcon.fromTheme("utilities-terminal") if _LINUX else QIcon()
+        idx = self._tabs.addTab(view, tab_icon, f"{'🔑 ' if not _LINUX else ''}{conn.display_name()}")
         if conn.color:
             self._tabs.tabBar().setTabTextColor(idx, QColor(conn.color))
         self._tabs.setCurrentIndex(idx)
@@ -414,7 +424,7 @@ class MainWindow(QMainWindow):
         self._btn_edit.setEnabled(True)
         self._btn_del.setEnabled(True)
         from src.ui.welcome_widget import DetailWidget
-        self._update_home_tab(DetailWidget(conn, self), f"{_ico('📋 ', '')}{conn.display_name()}")
+        self._update_home_tab(DetailWidget(conn, self), f"{'📋 ' if not _LINUX else ''}{conn.display_name()}")
 
     def _on_connection_activated(self, conn: Connection) -> None:
         """Double-click or Enter — open a terminal tab."""

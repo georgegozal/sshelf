@@ -183,12 +183,16 @@ class ConnectionTree(QWidget):
                     g_item.setExpanded(True)
 
             c_item = QTreeWidgetItem()
-            _prefix = "  " if _LINUX else "  🔑  "
-            c_item.setText(0, f"{_prefix}{conn.display_name()}")
+            c_item.setText(0, f"  {'🔑  ' if not _LINUX else ''}{conn.display_name()}")
             c_item.setText(1, conn.connection_string())
             c_item.setFlags(_CONN_FLAGS)
             c_item.setData(0, Qt.ItemDataRole.UserRole, conn)
             c_item.setToolTip(0, conn.notes or conn.connection_string())
+            # On Linux use a freedesktop theme key icon instead of emoji
+            if _LINUX:
+                key_icon = QIcon.fromTheme("dialog-password")
+                if not key_icon.isNull():
+                    c_item.setIcon(0, key_icon)
 
             # Colour dot using the connection's assigned colour
             if conn.color:
@@ -248,7 +252,7 @@ class ConnectionTree(QWidget):
         menu = QMenu(self)
 
         if conn:
-            act_connect = QAction("Connect" if _LINUX else "⚡  Connect", self)
+            act_connect = QAction("⚡  Connect", self)
             act_connect.triggered.connect(lambda: self.connection_activated.emit(conn))
             menu.addAction(act_connect)
             menu.addSeparator()
