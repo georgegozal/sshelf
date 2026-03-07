@@ -114,6 +114,11 @@ class MainWindow(QMainWindow):
         act_quick.triggered.connect(self._on_quick_connect_focus)
         file_menu.addAction(act_quick)
 
+        act_palette = QAction("&Command Palette…", self)
+        act_palette.setShortcut(QKeySequence("Ctrl+P"))
+        act_palette.triggered.connect(self._on_command_palette)
+        file_menu.addAction(act_palette)
+
         act_import = QAction("&Import from ~/.ssh/config…", self)
         act_import.triggered.connect(self._on_import_ssh_config)
         file_menu.addAction(act_import)
@@ -529,6 +534,33 @@ class MainWindow(QMainWindow):
     def _on_quick_connect_focus(self) -> None:
         self._qc_host.setFocus()
         self._qc_host.selectAll()
+
+    def _on_command_palette(self) -> None:
+        """Open the Cmd+P command palette with connections + app actions."""
+        from src.ui.command_palette import CommandPalette
+
+        items: list[tuple[str, str, object]] = []
+
+        # ── Saved connections ──────────────────────────────────────────
+        for conn in self.db.all_connections():
+            c = conn  # capture
+            label = f"{_ico('🔑', '[SSH]')}  {c.display_name()}"
+            items.append((label, c.connection_string(), lambda c=c: self._open_terminal(c)))
+
+        # ── App actions ────────────────────────────────────────────────
+        items += [
+            (f"{_ico('＋', '+')}  New Connection…",      "Ctrl+N",  self._on_new_connection),
+            (f"{_ico('✎', 'E')}  Edit Connection…",       "Ctrl+E",  self._on_edit_connection),
+            ("⚙  Preferences…",                            "Ctrl+,",  self._on_preferences),
+            ("📥  Import ~/.ssh/config…",                  "",         self._on_import_ssh_config),
+            (f"{_ico('🔑', 'K')}  Generate SSH Key…",     "",         self._on_generate_key),
+            ("📡  Toggle Broadcast Input",                  "",         lambda: self._btn_broadcast.toggle()),
+            ("⬛  Toggle Fullscreen",                       "Ctrl+↩",  lambda: self._on_toggle_fullscreen(
+                                                                            not self._fullscreen_active)),
+        ]
+
+        palette = CommandPalette(items, parent=self)
+        palette.exec()
 
     def _on_search(self, text: str) -> None:
         self._tree.filter(text)

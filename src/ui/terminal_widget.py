@@ -326,6 +326,7 @@ class TerminalWidget(QWidget):
         self._cwd_thread: Optional[QThread] = None
         self._cwd_worker = None
         self._build_ui()
+        self._restore_font_size()
 
     # ── UI construction ──────────────────────────────────────────────────────
 
@@ -469,6 +470,7 @@ class TerminalWidget(QWidget):
         self._output.key_pressed.connect(self._on_key)
         self._output.resize_pty.connect(self._on_resize_pty)
         self._output.search_requested.connect(self._toggle_search)
+        self._output.font_size_changed.connect(self._on_font_size_changed)
         self._content_splitter.addWidget(self._output)
 
         # Side panel (hidden by default)
@@ -704,6 +706,29 @@ class TerminalWidget(QWidget):
         self._side_tabs.setTabIcon(1, QIcon.fromTheme("folder"))
         self._side_tabs.setTabIcon(2, QIcon.fromTheme("network-transmit-receive"))
 
+    # ── Per-connection font size ──────────────────────────────────────────────
+
+    def _restore_font_size(self) -> None:
+        """Apply the saved per-connection font size (if any) after UI is built."""
+        if self._conn.id is None or self._db is None:
+            return
+        raw = self._db.get_pref(f"font_size_{self._conn.id}")
+        if not raw:
+            return
+        try:
+            sz = int(raw)
+            font = self._output.font()
+            font.setPointSize(max(_FONT_SIZE_MIN, min(_FONT_SIZE_MAX, sz)))
+            self._output.setFont(font)
+            self._output._sync_pty_size()
+        except (ValueError, AttributeError):
+            pass
+
+    def _on_font_size_changed(self, size: int) -> None:
+        """Persist the new font size for this connection in preferences."""
+        if self._conn.id is not None and self._db is not None:
+            self._db.set_pref(f"font_size_{self._conn.id}", str(size))
+
     def _detect_cwd_async(self) -> None:
         """Open an exec channel in the background to detect the shell's CWD."""
         if self._cwd_thread and self._cwd_thread.isRunning():
@@ -915,9 +940,10 @@ class _PyteTerminal(QPlainTextEdit):
         they reach keyPressEvent() rather than triggering menu actions.
     """
 
-    key_pressed     = pyqtSignal(bytes)
-    resize_pty      = pyqtSignal(int, int)   # cols, rows
+    key_pressed      = pyqtSignal(bytes)
+    resize_pty       = pyqtSignal(int, int)   # cols, rows
     search_requested = pyqtSignal()
+    font_size_changed = pyqtSignal(int)        # emitted after every zoom change
 
     # Qt key → ANSI/VT sequence
     _KEY_MAP: dict[int, bytes] = {
@@ -996,6 +1022,7 @@ class _PyteTerminal(QPlainTextEdit):
             font.setPointSize(max(_FONT_SIZE_MIN, min(_FONT_SIZE_MAX, font.pointSize() + delta)))
         self.setFont(font)
         self._sync_pty_size()
+        self.font_size_changed.emit(font.pointSize())
 
     # ── Clipboard ─────────────────────────────────────────────────────────────
 
