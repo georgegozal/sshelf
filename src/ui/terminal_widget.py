@@ -1258,8 +1258,11 @@ class _PyteTerminal(QPlainTextEdit):
                 return True
         if event.type() == QEvent.Type.ShortcutOverride:
             mods = event.modifiers()
-            if mods & (Qt.KeyboardModifier.ControlModifier |
-                       Qt.KeyboardModifier.MetaModifier):
+            # Accept Ctrl+* so terminal control sequences (Ctrl+C, Ctrl+Z…) reach
+            # keyPressEvent instead of firing menu actions.
+            # Do NOT accept Meta (Cmd on macOS) — that lets registered menu
+            # shortcuts like Cmd+P (command palette) fire normally.
+            if mods & Qt.KeyboardModifier.ControlModifier:
                 event.accept()
                 return True
         return super().event(event)
@@ -1284,6 +1287,8 @@ class _PyteTerminal(QPlainTextEdit):
                 return
 
         # Cmd+= / Cmd++ → zoom in  |  Cmd+- → zoom out  |  Cmd+0 → reset
+        # Any other Cmd+key is silently dropped (never sent to SSH) so that
+        # menu shortcuts such as Cmd+P can fire when the terminal has focus.
         if meta and not ctrl:
             if key in (Qt.Key.Key_Equal, Qt.Key.Key_Plus):
                 self._zoom_font(+1)
@@ -1294,6 +1299,7 @@ class _PyteTerminal(QPlainTextEdit):
             if key == Qt.Key.Key_0:
                 self._zoom_font(0)
                 return
+            return  # unknown Cmd+key — don't forward to SSH
 
         # Ctrl+F → open search bar (do NOT send \x06 to SSH)
         if ctrl and key == Qt.Key.Key_F:
