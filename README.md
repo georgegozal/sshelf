@@ -12,17 +12,43 @@ A Remmina-inspired SSH connection manager for macOS, built with Python and PyQt6
 - Quick-connect bar for one-shot connections (`user@host:port`)
 - Search/filter connections in real time
 - Import connections directly from `~/.ssh/config` (File → Import from ~/.ssh/config…)
+- **Command Palette** (`Cmd+P`) — fuzzy search over all connections and app commands; open any session in one keystroke
 
 ### Terminal
 - Multi-tab terminal — open multiple SSH sessions simultaneously; each connection gets its own tab
+- **Split panes** — click ⊞ to open a second SSH session to the same host side by side
 - Full VT100/xterm-256color support — vim, htop, less, nano all work correctly
 - Alt-screen programs (vim, htop) render cleanly with no frame stacking
 - Dynamic PTY resize — terminal columns/rows follow the window size automatically
 - Copy: select text then `Cmd+C` or right-click → Copy
 - Paste: `Cmd+V` or right-click → Paste
-- Font zoom: `Cmd+=` / `Cmd++` increase, `Cmd+-` decrease, `Cmd+0` reset to default
+- Font zoom: `Cmd+=` / `Cmd++` increase, `Cmd+-` decrease, `Cmd+0` reset; **zoom level is remembered per connection**
+- **Terminal search** — `Ctrl+F` inline search bar with previous/next navigation
+- **Session logging** — toggle ⏺ to write ANSI-stripped plain text to `logs/`
+- **Auto-reconnect** — red bar with ↺ button appears on unexpected disconnect
 - Tab color matches the connection's assigned color for quick visual identification
 - Session end (typing `exit`) closes the tab automatically
+
+### Command snippets
+- Save frequently used commands globally or per-connection
+- Click any snippet in the ⚡ side panel to send it instantly
+
+### SFTP file browser
+- Built-in 📁 side panel — browse the remote filesystem, download, or upload files
+- Auto-connects on the existing SSH session (no second login needed)
+
+### Terminal color themes
+- Five built-in themes: **One Dark**, **Dracula**, **Solarized Dark**, **Nord**, **Gruvbox Dark**
+- Switch themes in Preferences — applied live to all open terminals
+
+### SSH key management
+- Generate new SSH key pairs from File → Generate SSH Key…
+- Supports ed25519, ECDSA (256/384/521), RSA-2048 and RSA-4096
+- One-click copy of public key or `ssh-copy-id` command
+
+### Port forwarding
+- Define local and remote tunnels per connection in the 🔀 side panel
+- Tunnels start automatically when the SSH session connects
 
 ### Security
 - Passwords stored in the **macOS Keychain** via the `keyring` library — never written to disk in plaintext
@@ -32,6 +58,10 @@ A Remmina-inspired SSH connection manager for macOS, built with Python and PyQt6
 ### UI / UX
 - Single-click a connection → shows detail panel in the Home tab without disturbing active terminals
 - Double-click a connection → opens or switches to its terminal tab
+- **Detachable tabs** — right-click any tab → Open in New Window
+- **macOS menu bar icon** — quick access to recent connections, quick connect, and quit
+- **Fullscreen mode** — `Cmd+Enter` hides all chrome and goes fullscreen
+- **Broadcast input** — 📡 toolbar button sends keystrokes to all open terminal panes simultaneously
 - Light / Dark / System theme switching (Preferences)
 - Window geometry persisted across launches
 
@@ -69,43 +99,63 @@ python main.py
 
 | Shortcut | Action |
 |----------|--------|
+| `Cmd+P` | Open command palette |
 | `Cmd+N` | New connection |
 | `Cmd+E` | Edit selected connection |
 | `Cmd+Backspace` | Delete selected connection |
 | `Cmd+Shift+Q` | Focus quick-connect bar |
 | `Cmd+Shift+L` | Toggle connection list panel |
 | `Cmd+,` | Preferences |
+| `Cmd+Enter` | Toggle fullscreen |
+| `Cmd+W` | Close current tab |
+| `Cmd+1` – `Cmd+9` | Switch to tab by position |
 | `Cmd+Q` | Quit |
-| `Cmd+C` | Copy terminal selection |
-| `Cmd+V` | Paste to terminal |
+| `Cmd+C` / `Ctrl+Shift+C` | Copy terminal selection |
+| `Cmd+V` / `Ctrl+Shift+V` | Paste to terminal |
 | `Cmd+=` / `Cmd++` | Increase terminal font size |
 | `Cmd+-` | Decrease terminal font size |
 | `Cmd+0` | Reset terminal font size |
+| `Ctrl+F` | Open inline search bar |
+| `Ctrl+C` | Send SIGINT (`\x03`) to remote process |
 
 ## Project structure
 
 ```
 remminamac/
-├── main.py                      Entry point
+├── main.py                          Entry point — creates QApplication, Database, MainWindow
 ├── requirements.txt
-├── src/
-│   ├── app.py                   QApplication subclass, theme management
-│   ├── models/
-│   │   └── connection.py        Connection data model
-│   ├── storage/
-│   │   ├── database.py          SQLite persistence (connections + preferences)
-│   │   └── keychain.py          macOS Keychain wrapper (keyring)
-│   ├── protocols/
-│   │   ├── base.py              Base protocol handler
-│   │   └── ssh.py               SSH handler (paramiko + jump host support)
-│   └── ui/
-│       ├── main_window.py            Main application window + tab manager
-│       ├── connection_tree.py        Left-panel connection tree
-│       ├── connection_dialog.py      Add/edit connection dialog
-│       ├── terminal_widget.py        Embedded SSH terminal (pyte VT100)
-│       ├── ssh_config_import_dialog.py  ~/.ssh/config import dialog
-│       ├── welcome_widget.py         Welcome / detail panel
-│       └── preferences_dialog.py     App preferences dialog
+├── docs/                            Detailed documentation
+│   ├── architecture.md
+│   ├── terminal-internals.md
+│   ├── security.md
+│   └── development.md
+└── src/
+    ├── app.py                       QApplication subclass — theme management
+    ├── models/
+    │   ├── connection.py            Connection dataclass + to_dict / from_dict
+    │   └── tunnel.py                Tunnel dataclass (port-forwarding rules)
+    ├── storage/
+    │   ├── database.py              SQLite persistence (connections, preferences, snippets, tunnels)
+    │   └── keychain.py              macOS Keychain wrapper
+    ├── protocols/
+    │   ├── base.py                  Abstract base for protocol workers
+    │   ├── ssh.py                   SSHWorker: paramiko in a QThread
+    │   └── tunnel_worker.py         LocalTunnelWorker + RemoteTunnelWorker
+    └── ui/
+        ├── main_window.py           Main window + tab manager + tray icon + broadcast
+        ├── connection_tree.py       Left panel: grouped connection list + health dots
+        ├── connection_dialog.py     Add / edit connection dialog
+        ├── terminal_widget.py       Embedded VT100 terminal (pyte + QPlainTextEdit)
+        ├── split_view.py            Horizontal split container for multiple terminal panes
+        ├── command_palette.py       Cmd+P fuzzy-search command palette
+        ├── welcome_widget.py        Home tab: welcome screen + connection detail
+        ├── preferences_dialog.py    App preferences (theme, icon theme, terminal theme)
+        ├── ssh_config_import_dialog.py  ~/.ssh/config import UI
+        ├── snippets_panel.py        Command snippets side panel
+        ├── sftp_panel.py            SFTP file browser side panel
+        ├── tunnel_panel.py          Port-forwarding side panel
+        ├── themes.py                Built-in terminal color themes
+        └── key_gen_dialog.py        SSH key pair generation dialog
 ```
 
 ## Data storage
@@ -113,8 +163,10 @@ remminamac/
 | Data | Location |
 |------|----------|
 | Connection metadata | `~/Library/Application Support/RemminaMac/connections.db` |
-| Passwords | macOS Keychain (service: `RemminaMac`) |
+| Passwords & passphrases | macOS Keychain (service: `RemminaMac`) |
 | Preferences | Same SQLite database, `preferences` table |
+| Snippets | Same SQLite database, `snippets` table |
+| Tunnel rules | Same SQLite database, `tunnels` table |
 
 ## Documentation
 

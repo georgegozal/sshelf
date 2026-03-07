@@ -32,21 +32,30 @@ remminamac/
 └── src/
     ├── app.py                       QApplication subclass — theme management
     ├── models/
-    │   └── connection.py            Connection dataclass + to_dict / from_dict
+    │   ├── connection.py            Connection dataclass + to_dict / from_dict
+    │   └── tunnel.py                Tunnel dataclass (id, conn_id, label, type, ports)
     ├── storage/
-    │   ├── database.py              SQLite persistence (connections + preferences)
+    │   ├── database.py              SQLite: connections, preferences, snippets, tunnels
     │   └── keychain.py              macOS Keychain wrapper
     ├── protocols/
     │   ├── base.py                  Abstract base for protocol workers
-    │   └── ssh.py                   SSHWorker: paramiko in a QThread
+    │   ├── ssh.py                   SSHWorker: paramiko in a QThread
+    │   └── tunnel_worker.py         LocalTunnelWorker + RemoteTunnelWorker
     └── ui/
-        ├── main_window.py           Main window + tab manager
-        ├── connection_tree.py       Left panel: grouped connection list
+        ├── main_window.py           Main window + tab manager + tray + broadcast
+        ├── connection_tree.py       Left panel: grouped connection list + health dots
         ├── connection_dialog.py     Add / edit connection dialog
         ├── terminal_widget.py       Embedded VT100 terminal (pyte + QPlainTextEdit)
-        ├── ssh_config_import_dialog.py  ~/.ssh/config import UI
+        ├── split_view.py            Horizontal split container for multiple terminal panes
+        ├── command_palette.py       Cmd+P fuzzy-search command palette
         ├── welcome_widget.py        Home tab: welcome screen + connection detail
-        └── preferences_dialog.py   App preferences
+        ├── preferences_dialog.py    App preferences (theme, icon theme, terminal theme)
+        ├── ssh_config_import_dialog.py  ~/.ssh/config import UI
+        ├── snippets_panel.py        Command snippets side panel
+        ├── sftp_panel.py            SFTP file browser side panel
+        ├── tunnel_panel.py          Port-forwarding side panel
+        ├── themes.py                Built-in terminal color themes (Theme dataclass)
+        └── key_gen_dialog.py        SSH key pair generation dialog
 ```
 
 ## Adding a new connection field
@@ -70,6 +79,7 @@ remminamac/
 - Lazy imports inside methods (`from src.ui.foo import Foo`) for widgets that are not always needed — avoids circular imports and speeds up startup.
 - No global mutable state. Pass `Database` explicitly to every widget that needs it.
 - All network / blocking I/O in `QThread` workers. The main thread must stay responsive at all times.
+- Always call `thread.quit()` + `thread.wait()` before allowing the owning widget to be deleted. Never rely on `deleteLater()` alone.
 
 ## Common tasks
 
@@ -79,6 +89,7 @@ remminamac/
 sqlite3 ~/Library/Application\ Support/RemminaMac/connections.db
 .tables
 SELECT id, name, host, username FROM connections;
+SELECT key, value FROM preferences;
 ```
 
 ### Wipe all data (fresh start)
@@ -87,30 +98,25 @@ SELECT id, name, host, username FROM connections;
 rm ~/Library/Application\ Support/RemminaMac/connections.db
 ```
 
-Keychain entries are not removed by this. To also clear them:
-
-```bash
-python3 -c "
-import keyring
-# list entries manually in Keychain Access.app → service 'RemminaMac'
-"
-```
-
-Or delete them in **Keychain Access.app** → search `RemminaMac` → delete all entries.
+Keychain entries are not removed by this. Delete them in **Keychain Access.app** → search `RemminaMac` → delete all entries.
 
 ### Changing the terminal colour scheme
 
-All colour constants are at the top of `src/ui/terminal_widget.py`:
+Terminal themes are defined in `src/ui/themes.py` as frozen `Theme` dataclasses. To add a new theme:
+
+1. Add a `Theme(...)` instance to `_THEMES` in `themes.py`.
+2. It will automatically appear in the Preferences → Terminal Theme dropdown.
+
+The active theme is applied at startup by `apply_terminal_theme()` in `terminal_widget.py`. To switch themes at runtime, call `apply_terminal_theme(theme)` and then `refresh_theme()` on each open `_PyteTerminal`.
+
+For quick one-off tweaks, the raw colour globals are at the top of `terminal_widget.py`:
 
 ```python
 _DEFAULT_FG = "#d4d4d4"   # default foreground
 _DEFAULT_BG = "#1e1e1e"   # background
 _CURSOR_BG  = "#528bff"   # cursor highlight
-
 _NAMED = { ... }           # ANSI named colours → hex
 ```
-
-Replace the `_NAMED` palette and the three defaults with your preferred theme.
 
 ### Adjusting scrollback size
 
@@ -131,6 +137,8 @@ _FONT_SIZE_DEFAULT = 13
 
 font = QFont("Menlo", 13)   # change "Menlo" to any monospace font
 ```
+
+Users can also zoom per-connection with `Cmd+=` / `Cmd+-`; that size is persisted automatically.
 
 ## Debugging
 
@@ -154,3 +162,4 @@ Or add it to `main.py` temporarily.
 All `SSHWorker` signals cross the thread boundary. If you see crashes or Qt warnings about accessing objects from the wrong thread, verify that:
 - You are not calling `QWidget` methods directly from `SSHWorker`.
 - Signals are connected with the default `AutoConnection` (not `DirectConnection`).
+- `thread.wait()` is called after `thread.quit()` before the owning `QObject` can be deleted.
