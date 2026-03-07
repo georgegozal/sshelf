@@ -769,7 +769,9 @@ class TerminalWidget(QWidget):
 
     def _on_connected(self) -> None:
         self._set_status(f"Connected to {self._conn.connection_string()}")
-        self._output.setFocus()
+        # Delay focus slightly so any key held to activate the command palette
+        # (e.g. Enter) is released before the terminal starts consuming input.
+        QTimer.singleShot(150, self._output.setFocus)
         if self._conn.id is not None:
             self.health_changed.emit(self._conn.id, "connected")
         # Start byte-counter ticker

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from PyQt6.QtCore import QEvent, QSize, Qt
+from PyQt6.QtCore import QEvent, QSize, QTimer, Qt
 from PyQt6.QtGui import QColor, QKeyEvent, QPainter, QPalette
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QLineEdit, QListWidget, QListWidgetItem,
@@ -202,8 +202,10 @@ class CommandPalette(QDialog):
     def _activate_item(self, item: QListWidgetItem) -> None:
         cb = item.data(_ROLE_CB)
         self.accept()
+        # Defer the callback so the Enter keypress that triggered activation is
+        # fully consumed before any new widget receives focus or input.
         if callable(cb):
-            cb()
+            QTimer.singleShot(0, cb)
 
     # ------------------------------------------------------------------
     # Keyboard handling: arrows + Enter in the search box
