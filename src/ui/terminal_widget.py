@@ -761,9 +761,18 @@ class TerminalWidget(QWidget):
         self._thread.start()
 
     def _on_disconnect(self) -> None:
+        """User-initiated disconnect — always closes the tab."""
+        self._reconnect_bar.hide()
+        # Set flag so _on_finished won't emit disconnected a second time.
+        self._had_error = True
+        if self._stats_timer:
+            self._stats_timer.stop()
+            self._stats_timer = None
         if self._worker:
             self._worker.disconnect()
-        self._set_status("Disconnected.")
+        if self._conn.id is not None:
+            self.health_changed.emit(self._conn.id, "disconnected")
+        self.disconnected.emit("Disconnected.")
 
     # ── Worker signals ────────────────────────────────────────────────────────
 
