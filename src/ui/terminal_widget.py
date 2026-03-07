@@ -318,6 +318,7 @@ class TerminalWidget(QWidget):
         self._sftp_thread: Optional[QThread] = None
         self._sftp_worker = None
         self._had_error = False
+        self._closing   = False   # set by _on_disconnect to suppress reconnect bar
         self._log_file  = None
         self._bytes_rx: int = 0
         self._bytes_tx: int = 0
@@ -763,13 +764,21 @@ class TerminalWidget(QWidget):
     def _on_disconnect(self) -> None:
         """User-initiated disconnect — always closes the tab."""
         self._reconnect_bar.hide()
-        # Set flag so _on_finished won't emit disconnected a second time.
-        self._had_error = True
+        self._closing = True
+        if self._had_error or (self._thread and not self._thread.isRunning()):
+            # Thread already finished (after error or before connect) — close now.
+            self._do_close()
+            return
+        # Thread still running (connecting or connected): tell worker to stop.
+        # _on_finished will call _do_close() once the thread actually ends.
+        if self._worker:
+            self._worker.disconnect()
+
+    def _do_close(self) -> None:
+        """Emit the signals that cause SplitView to remove this pane."""
         if self._stats_timer:
             self._stats_timer.stop()
             self._stats_timer = None
-        if self._worker:
-            self._worker.disconnect()
         if self._conn.id is not None:
             self.health_changed.emit(self._conn.id, "disconnected")
         self.disconnected.emit("Disconnected.")
@@ -829,6 +838,9 @@ class TerminalWidget(QWidget):
 
     def _on_error(self, msg: str) -> None:
         self._had_error = True
+        if self._closing:
+            # User already clicked Disconnect — _on_finished will close the tab.
+            return
         self._set_status(f"Error: {msg}")
         self._output.feed(f"\r\n\x1b[31m*** {msg} ***\x1b[0m\r\n".encode())
         self._reconnect_msg.setText(f"Connection lost: {msg}")
@@ -840,10 +852,15 @@ class TerminalWidget(QWidget):
     def _on_finished(self) -> None:
         if self._thread:
             self._thread.quit()
+            self._thread.wait(2000)   # join thread before any deleteLater() can fire
         if self._stats_timer:
             self._stats_timer.stop()
             self._stats_timer = None
         self._tunnel_panel.set_worker(None)
+        if self._closing:
+            # User clicked Disconnect while thread was running — close tab now.
+            self._do_close()
+            return
         if self._had_error:
             return  # reconnect bar is already shown — nothing else to do
         self._set_status("Session closed.")
