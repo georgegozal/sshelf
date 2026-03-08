@@ -231,34 +231,57 @@ class _GetCwdWorker(QObject):
           ├── bash          ← interactive shell  (PPid = $PPID)
           └── sh            ← this probe         (PPid = $PPID)
 
-    We search GPPID's children first (covers OpenSSH), then fall back to
-    $PPID's children (covers dropbear / Termux).  If /proc is absent
-    (macOS server) GPPID is empty and we exit silently — the OSC-7 path
-    stays as the source of truth.
+    Stage 1 (Linux/Android): scan /proc — GPPID children first (OpenSSH),
+    then $PPID children (dropbear).  Exits immediately with the CWD.
+    Stage 2 (macOS/BSD): /proc is absent; use `ps` to locate the shell PID
+    and `lsof` to read its open CWD file descriptor.
+    If both stages fail we emit the OSC-7 fallback or nothing.
     """
 
     cwd_found = pyqtSignal(str)
     finished  = pyqtSignal()
 
-    # Try GPPID children (OpenSSH), then $PPID children (dropbear).
-    # Skip $PPID itself and $$ to avoid matching the exec-sshd fork or ourselves.
-    # Exit without output if /proc is unavailable (macOS server).
+    # Two-stage probe that works on Linux (/proc) and macOS (ps + lsof):
+    #
+    #   Stage 1 – Linux/Android: scan /proc for a shell whose PPid matches
+    #             GPPID (OpenSSH) or $PPID (dropbear/flat sshd).
+    #   Stage 2 – macOS/BSD: use `ps` to find the shell PID, then `lsof`
+    #             to read its CWD (macOS has no /proc/$pid/cwd).
+    #
+    # GPPID is obtained from /proc on Linux or `ps -o ppid=` on macOS.
+    # If neither yields a result we exit silently; the caller falls back
+    # to the OSC-7 path stored in _remote_cwd.
     _CMD = (
+        # Resolve GPPID: common ancestor of interactive shell and exec channel.
+        # Linux gets it from /proc; macOS/BSD falls back to `ps`.
         "GPPID=$(awk '/^PPid:/{print $2}' /proc/$PPID/status 2>/dev/null);"
+        "[ -z \"$GPPID\" ]"
+        " && GPPID=$(ps -o ppid= -p \"$PPID\" 2>/dev/null | tr -d ' ');"
         "[ -z \"$GPPID\" ] && exit 1;"
+        # Stage 1: Linux /proc — try GPPID children (OpenSSH), then $PPID (dropbear)
         "for pv in \"$GPPID\" \"$PPID\"; do"
         " for pid in $(ls /proc 2>/dev/null | grep '^[0-9]'); do"
         "  [ \"$pid\" = \"$$\" ] && continue;"
         "  [ \"$pid\" = \"$PPID\" ] && continue;"
-        "  ppid=$(awk '/^PPid:/{print $2}' /proc/$pid/status 2>/dev/null);"
-        "  [ \"$ppid\" = \"$pv\" ] || continue;"
+        "  pp=$(awk '/^PPid:/{print $2}' /proc/$pid/status 2>/dev/null);"
+        "  [ \"$pp\" = \"$pv\" ] || continue;"
         "  comm=$(cat /proc/$pid/comm 2>/dev/null);"
         "  case \"$comm\" in bash|zsh|sh|fish|dash|-bash|-zsh)"
-        "    cwd=$(readlink /proc/$pid/cwd 2>/dev/null);"
-        "    [ -n \"$cwd\" ] && echo \"$cwd\" && exit 0;;"
+        "   cwd=$(readlink /proc/$pid/cwd 2>/dev/null);"
+        "   [ -n \"$cwd\" ] && echo \"$cwd\" && exit 0;;"
         "  esac;"
         " done;"
-        "done"
+        "done;"
+        # Stage 2: macOS/BSD — find shell via ps, read CWD via lsof
+        "spid=$(ps -axo pid=,ppid=,comm= 2>/dev/null | awk"
+        " -v g=\"$GPPID\" -v p=\"$PPID\" -v me=\"$$\""
+        " '($2==g||$2==p)&&$1!=me&&$1!=p"
+        "  &&($3==\"bash\"||$3==\"zsh\"||$3==\"sh\""
+        "    ||$3==\"fish\"||$3==\"dash\"||$3==\"-bash\"||$3==\"-zsh\")"
+        "  {print $1;exit}');"
+        "[ -z \"$spid\" ] && exit 1;"
+        "lsof -p \"$spid\" -a -d cwd -Fn 2>/dev/null"
+        " | awk '/^n/{print substr($0,2);exit}'"
     )
 
     def __init__(self, worker: SSHWorker, fallback: str = "") -> None:
