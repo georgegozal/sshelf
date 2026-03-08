@@ -261,9 +261,10 @@ class _GetCwdWorker(QObject):
         "done"
     )
 
-    def __init__(self, worker: SSHWorker) -> None:
+    def __init__(self, worker: SSHWorker, fallback: str = "") -> None:
         super().__init__()
-        self._worker = worker
+        self._worker   = worker
+        self._fallback = fallback   # OSC-7 path to use when /proc is absent
 
     def run(self) -> None:
         cwd = ""
@@ -280,8 +281,7 @@ class _GetCwdWorker(QObject):
         except Exception:  # noqa: BLE001
             pass
         finally:
-            if cwd:
-                self.cwd_found.emit(cwd)
+            self.cwd_found.emit(cwd or self._fallback)
             self.finished.emit()
 
 
@@ -757,7 +757,7 @@ class TerminalWidget(QWidget):
         if self._cwd_thread and self._cwd_thread.isRunning():
             return
         self._cwd_thread = QThread(self)
-        self._cwd_worker = _GetCwdWorker(self._worker)
+        self._cwd_worker = _GetCwdWorker(self._worker, fallback=self._remote_cwd)
         self._cwd_worker.moveToThread(self._cwd_thread)
         self._cwd_thread.started.connect(self._cwd_worker.run)
         self._cwd_worker.cwd_found.connect(self._on_cwd_detected)
@@ -766,6 +766,8 @@ class TerminalWidget(QWidget):
 
     def _on_cwd_detected(self, cwd: str) -> None:
         """Called when the exec-channel CWD probe finishes."""
+        if not cwd:
+            return
         self._remote_cwd = cwd
         self._sftp_panel.navigate_to(cwd)
 
