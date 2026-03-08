@@ -218,24 +218,47 @@ class _GetCwdWorker(QObject):
     Opens a short-lived exec channel on the existing SSH transport and runs a
     shell one-liner that finds the interactive shell's CWD via /proc.
 
-    Strategy: the exec channel's parent process (PPID) is the same sshd child
-    that also spawned the interactive shell, so the shell is a sibling — we
-    list /proc entries whose PPid matches ours and whose name is a known shell.
+    Two common sshd process layouts:
+
+      OpenSSH (two-level):
+        sshd-session (GPPID)
+          ├── bash          ← interactive shell  (PPid = GPPID)
+          └── exec-sshd     ← exec channel fork  (PPid = GPPID, PID = $PPID)
+                └── sh      ← this probe         (PPid = $PPID)
+
+      dropbear / flat (one-level):
+        dropbear (= $PPID)
+          ├── bash          ← interactive shell  (PPid = $PPID)
+          └── sh            ← this probe         (PPid = $PPID)
+
+    We search GPPID's children first (covers OpenSSH), then fall back to
+    $PPID's children (covers dropbear / Termux).  If /proc is absent
+    (macOS server) GPPID is empty and we exit silently — the OSC-7 path
+    stays as the source of truth.
     """
 
     cwd_found = pyqtSignal(str)
     finished  = pyqtSignal()
 
-    # Shell one-liner: find sibling shell process → readlink its /proc cwd
+    # Try GPPID children (OpenSSH), then $PPID children (dropbear).
+    # Skip $PPID itself and $$ to avoid matching the exec-sshd fork or ourselves.
+    # Exit without output if /proc is unavailable (macOS server).
     _CMD = (
-        "for pid in $(ls /proc 2>/dev/null | grep '^[0-9]'); do"
-        " ppid=$(awk '/^PPid:/{print $2}' /proc/$pid/status 2>/dev/null);"
-        " [ \"$ppid\" = \"$PPID\" ] || continue;"
-        " comm=$(cat /proc/$pid/comm 2>/dev/null);"
-        " case \"$comm\" in bash|zsh|sh|fish|dash|-bash|-zsh)"
-        "   cwd=$(readlink /proc/$pid/cwd 2>/dev/null);"
-        "   [ -n \"$cwd\" ] && echo \"$cwd\" && exit 0;;"
-        " esac; done; echo $HOME"
+        "GPPID=$(awk '/^PPid:/{print $2}' /proc/$PPID/status 2>/dev/null);"
+        "[ -z \"$GPPID\" ] && exit 1;"
+        "for pv in \"$GPPID\" \"$PPID\"; do"
+        " for pid in $(ls /proc 2>/dev/null | grep '^[0-9]'); do"
+        "  [ \"$pid\" = \"$$\" ] && continue;"
+        "  [ \"$pid\" = \"$PPID\" ] && continue;"
+        "  ppid=$(awk '/^PPid:/{print $2}' /proc/$pid/status 2>/dev/null);"
+        "  [ \"$ppid\" = \"$pv\" ] || continue;"
+        "  comm=$(cat /proc/$pid/comm 2>/dev/null);"
+        "  case \"$comm\" in bash|zsh|sh|fish|dash|-bash|-zsh)"
+        "    cwd=$(readlink /proc/$pid/cwd 2>/dev/null);"
+        "    [ -n \"$cwd\" ] && echo \"$cwd\" && exit 0;;"
+        "  esac;"
+        " done;"
+        "done"
     )
 
     def __init__(self, worker: SSHWorker) -> None:
@@ -673,10 +696,9 @@ class TerminalWidget(QWidget):
             total = sum(sizes)
             if sizes[1] < 200:
                 self._content_splitter.setSizes([total - 280, 280])
-            # When opening SFTP panel: always detect the shell's current directory
-            # fresh (so cd + re-open SFTP always shows the right directory).
-            # OSC 7 updates _remote_cwd instantly if the shell emits it; the
-            # exec-channel probe is the reliable fallback for any server.
+            # When opening SFTP panel: run the exec-channel /proc probe to get
+            # the shell's actual current directory (always fresh, not stale).
+            # OSC 7 (_remote_cwd) is the fallback when no worker is available.
             if index == 1:
                 if self._worker:
                     self._detect_cwd_async()
