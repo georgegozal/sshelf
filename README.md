@@ -1,6 +1,6 @@
 # RemminaMac
 
-A Remmina-inspired SSH connection manager for macOS, built with Python and PyQt6.
+A Remmina-inspired SSH connection manager for macOS, Linux, and Windows, built with Python and PyQt6.
 
 ![RemminaMac screenshot](assets/screenshot.png)
 
@@ -51,7 +51,11 @@ A Remmina-inspired SSH connection manager for macOS, built with Python and PyQt6
 - Tunnels start automatically when the SSH session connects
 
 ### Security
-- Passwords stored in the **macOS Keychain** via the `keyring` library — never written to disk in plaintext
+- Passwords stored in the **OS keychain** via the `keyring` library — never written to disk in plaintext
+  - macOS: Keychain Access
+  - Linux: GNOME Keyring / KWallet (via SecretService; requires `secretstorage`)
+  - Windows: Windows Credential Manager
+  - Falls back to SQLite if no keychain backend is available
 - SSH key authentication with optional passphrase
 - Jump host (ProxyJump) support
 
@@ -61,13 +65,13 @@ A Remmina-inspired SSH connection manager for macOS, built with Python and PyQt6
 - **Detachable tabs** — right-click any tab → Open in New Window
 - **macOS menu bar icon** — quick access to recent connections, quick connect, and quit
 - **Fullscreen mode** — `Cmd+Enter` hides all chrome and goes fullscreen
-- **Broadcast input** — 📡 toolbar button sends keystrokes to all open terminal panes simultaneously
+- **Broadcast input** — 📡 toolbar button sends keystrokes to all open terminal panes simultaneously *(macOS/Linux only)*
 - Light / Dark / System theme switching (Preferences)
 - Window geometry persisted across launches
 
 ## Requirements
 
-- macOS 11+
+- macOS 11+, Linux, or Windows 10+
 - Python 3.10+
 
 Python dependencies (installed via `pip install -r requirements.txt`):
@@ -81,6 +85,38 @@ Python dependencies (installed via `pip install -r requirements.txt`):
 | keyring | >= 24.0.0 |
 
 ## Installation
+
+### One-line install (macOS and Linux)
+
+```bash
+bash install.sh
+```
+
+Clones the repo to `~/.local/share/remminamac`, creates a venv, installs dependencies, and puts a `remminamac` launcher in `~/.local/bin`. On Linux it also creates a `.desktop` file so RemminaMac appears in your application menu.
+
+To uninstall:
+
+```bash
+bash uninstall.sh
+```
+
+### One-line install (Windows)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+Clones the repo to `%LOCALAPPDATA%\remminamac`, creates a venv, installs dependencies, and creates a `remminamac.bat` launcher. Optionally adds the install directory to your user PATH.
+
+To uninstall:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File uninstall.ps1
+```
+
+> **Note:** Broadcast input (📡) is not supported on Windows.
+
+### Manual install
 
 ```bash
 python3 -m venv .venv
@@ -124,6 +160,10 @@ python main.py
 remminamac/
 ├── main.py                          Entry point — creates QApplication, Database, MainWindow
 ├── requirements.txt
+├── install.sh                       One-line installer (macOS + Linux)
+├── uninstall.sh                     Uninstaller (macOS + Linux)
+├── install.ps1                      One-line installer (Windows)
+├── uninstall.ps1                    Uninstaller (Windows)
 ├── docs/                            Detailed documentation
 │   ├── architecture.md
 │   ├── terminal-internals.md
@@ -136,7 +176,7 @@ remminamac/
     │   └── tunnel.py                Tunnel dataclass (port-forwarding rules)
     ├── storage/
     │   ├── database.py              SQLite persistence (connections, preferences, snippets, tunnels)
-    │   └── keychain.py              macOS Keychain wrapper
+    │   └── keychain.py              OS keychain wrapper (macOS Keychain / GNOME Keyring / Win Credential Manager)
     ├── protocols/
     │   ├── base.py                  Abstract base for protocol workers
     │   ├── ssh.py                   SSHWorker: paramiko in a QThread
@@ -162,8 +202,10 @@ remminamac/
 
 | Data | Location |
 |------|----------|
-| Connection metadata | `~/Library/Application Support/RemminaMac/connections.db` |
-| Passwords & passphrases | macOS Keychain (service: `RemminaMac`) |
+| Connection metadata (macOS) | `~/Library/Application Support/RemminaMac/connections.db` |
+| Connection metadata (Linux) | `~/.local/share/RemminaMac/connections.db` |
+| Connection metadata (Windows) | `%APPDATA%\RemminaMac\connections.db` |
+| Passwords & passphrases | OS keychain (service: `RemminaMac`) — see Security section |
 | Preferences | Same SQLite database, `preferences` table |
 | Snippets | Same SQLite database, `snippets` table |
 | Tunnel rules | Same SQLite database, `tunnels` table |
