@@ -103,7 +103,7 @@ curl -sSL https://raw.githubusercontent.com/georgegozal/remminamac/main/uninstal
 ### One-line install (Windows)
 
 ```powershell
-irm https://raw.githubusercontent.com/georgegozal/remminamac/main/install.ps1 | iex
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/georgegozal/remminamac/main/install.ps1 | iex"
 ```
 
 Clones the repo to `%LOCALAPPDATA%\remminamac`, creates a venv, installs dependencies, and creates a `remminamac.bat` launcher. Optionally adds the install directory to your user PATH.
@@ -111,7 +111,7 @@ Clones the repo to `%LOCALAPPDATA%\remminamac`, creates a venv, installs depende
 To uninstall:
 
 ```powershell
-irm https://raw.githubusercontent.com/georgegozal/remminamac/main/uninstall.ps1 | iex
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/georgegozal/remminamac/main/uninstall.ps1 | iex"
 ```
 
 ### Manual install
