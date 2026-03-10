@@ -4,10 +4,20 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/georgegozal/remminamac.git"
-INSTALL_DIR="$HOME/.local/share/remminamac"
 BIN_DIR="$HOME/.local/bin"
 LAUNCHER="$BIN_DIR/remminamac"
 DESKTOP_FILE="$HOME/.local/share/applications/remminamac.desktop"
+
+# -- Detect if running from inside an already-cloned repo --------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/main.py" && -f "$SCRIPT_DIR/requirements.txt" ]]; then
+  INSTALL_DIR="$SCRIPT_DIR"
+  _IN_REPO=true
+else
+  INSTALL_DIR="$HOME/.local/share/remminamac"
+  _IN_REPO=false
+fi
+
 ICON_SRC="$INSTALL_DIR/assets/screenshot.png"
 
 # -- Colour helpers -----------------------------------------------------------
@@ -42,11 +52,15 @@ done
 [[ -z "$PYTHON" ]] && error "Python 3.10+ is required. Install it and re-run."
 info "Using $("${PYTHON}" --version)"
 
-# -- Git check ----------------------------------------------------------------
-command -v git &>/dev/null || error "git is required. Install it and re-run."
+# -- Git check (only needed when cloning) -------------------------------------
+if [[ "$_IN_REPO" == false ]]; then
+  command -v git &>/dev/null || error "git is required. Install it and re-run."
+fi
 
-# -- Clone or update ----------------------------------------------------------
-if [[ -d "$INSTALL_DIR/.git" ]]; then
+# -- Clone or update (skipped when running from inside the repo) --------------
+if [[ "$_IN_REPO" == true ]]; then
+  info "Running from existing repo at ${INSTALL_DIR} — skipping clone."
+elif [[ -d "$INSTALL_DIR/.git" ]]; then
   info "Updating existing installation..."
   git -C "$INSTALL_DIR" pull --ff-only
 else

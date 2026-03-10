@@ -5,9 +5,19 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $REPO_URL   = "https://github.com/georgegozal/remminamac.git"
-$INSTALL_DIR = "$env:LOCALAPPDATA\remminamac"
-$LAUNCHER    = "$env:LOCALAPPDATA\remminamac\remminamac.bat"
-$BIN_DIR     = "$env:LOCALAPPDATA\remminamac"
+
+# -- Detect if running from inside an already-cloned repo ---------------------
+$SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ((Test-Path "$SCRIPT_DIR\main.py") -and (Test-Path "$SCRIPT_DIR\requirements.txt")) {
+    $INSTALL_DIR = $SCRIPT_DIR
+    $IN_REPO     = $true
+} else {
+    $INSTALL_DIR = "$env:LOCALAPPDATA\remminamac"
+    $IN_REPO     = $false
+}
+
+$BIN_DIR  = $INSTALL_DIR
+$LAUNCHER = "$INSTALL_DIR\remminamac.bat"
 
 function Info  { param($msg) Write-Host "[remminamac] $msg" -ForegroundColor Green }
 function Warn  { param($msg) Write-Host "[remminamac] $msg" -ForegroundColor Yellow }
@@ -26,13 +36,15 @@ foreach ($py in @("python", "python3", "py")) {
 if (-not $PYTHON) { Err "Python 3.10+ is required. Install from https://python.org and re-run." }
 Info "Using $(& $PYTHON --version)"
 
-# -- Git check ----------------------------------------------------------------
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+# -- Git check (only needed when cloning) -------------------------------------
+if (-not $IN_REPO -and -not (Get-Command git -ErrorAction SilentlyContinue)) {
     Err "git is required. Install from https://git-scm.com and re-run."
 }
 
-# -- Clone or update ----------------------------------------------------------
-if (Test-Path "$INSTALL_DIR\.git") {
+# -- Clone or update (skipped when running from inside the repo) --------------
+if ($IN_REPO) {
+    Info "Running from existing repo at $INSTALL_DIR -- skipping clone."
+} elseif (Test-Path "$INSTALL_DIR\.git") {
     Info "Updating existing installation..."
     git -C $INSTALL_DIR pull --ff-only
 } else {
