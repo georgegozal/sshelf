@@ -653,8 +653,8 @@ class MainWindow(QMainWindow):
         for t in all_terminals:
             try:
                 t.key_input.disconnect()
-            except TypeError:
-                pass  # no connections yet
+            except (TypeError, RuntimeError):
+                pass  # no connections yet (PyQt6 raises TypeError or RuntimeError)
 
         if not self._broadcast_active:
             return

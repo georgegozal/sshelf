@@ -65,7 +65,7 @@ A Remmina-inspired SSH connection manager for macOS, Linux, and Windows, built w
 - **Detachable tabs** — right-click any tab → Open in New Window
 - **macOS menu bar icon** — quick access to recent connections, quick connect, and quit
 - **Fullscreen mode** — `Cmd+Enter` hides all chrome and goes fullscreen
-- **Broadcast input** — 📡 toolbar button sends keystrokes to all open terminal panes simultaneously *(macOS/Linux only)*
+- **Broadcast input** — 📡 toolbar button sends keystrokes to all open terminal panes simultaneously
 - Light / Dark / System theme switching (Preferences)
 - Window geometry persisted across launches
 
@@ -113,8 +113,6 @@ To uninstall:
 ```powershell
 powershell -ExecutionPolicy Bypass -File uninstall.ps1
 ```
-
-> **Note:** Broadcast input (📡) is not supported on Windows.
 
 ### Manual install
 

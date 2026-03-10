@@ -930,7 +930,7 @@ class TerminalWidget(QWidget):
             ):
                 try:
                     sig.disconnect()
-                except TypeError:
+                except (TypeError, RuntimeError):
                     pass
             self._worker.disconnect()
         if self._thread:
