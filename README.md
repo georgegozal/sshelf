@@ -89,7 +89,7 @@ Python dependencies (installed via `pip install -r requirements.txt`):
 ### One-line install (macOS and Linux)
 
 ```bash
-bash install.sh
+curl -sSL https://raw.githubusercontent.com/georgegozal/remminamac/main/install.sh | bash
 ```
 
 Clones the repo to `~/.local/share/remminamac`, creates a venv, installs dependencies, and puts a `remminamac` launcher in `~/.local/bin`. On Linux it also creates a `.desktop` file so RemminaMac appears in your application menu.
@@ -97,13 +97,13 @@ Clones the repo to `~/.local/share/remminamac`, creates a venv, installs depende
 To uninstall:
 
 ```bash
-bash uninstall.sh
+curl -sSL https://raw.githubusercontent.com/georgegozal/remminamac/main/uninstall.sh | bash
 ```
 
 ### One-line install (Windows)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
+irm https://raw.githubusercontent.com/georgegozal/remminamac/main/install.ps1 | iex
 ```
 
 Clones the repo to `%LOCALAPPDATA%\remminamac`, creates a venv, installs dependencies, and creates a `remminamac.bat` launcher. Optionally adds the install directory to your user PATH.
@@ -111,7 +111,7 @@ Clones the repo to `%LOCALAPPDATA%\remminamac`, creates a venv, installs depende
 To uninstall:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File uninstall.ps1
+irm https://raw.githubusercontent.com/georgegozal/remminamac/main/uninstall.ps1 | iex
 ```
 
 ### Manual install
