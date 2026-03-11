@@ -15,6 +15,31 @@ from PyQt6.QtCore import QObject, pyqtSignal, QThread
 from src.models.connection import Connection
 
 
+def _connect_sock(host: str, port: int, timeout: float) -> socket.socket:
+    """Resolve host:port and return a connected socket, preferring IPv4.
+
+    Sorting AF_INET first avoids failures with IPv6 link-local addresses
+    (fe80::...) that mDNS/.local hostnames often resolve to on macOS.
+    """
+    infos = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    # Prefer IPv4 (AF_INET=2) over IPv6 (AF_INET6=10/30)
+    infos.sort(key=lambda x: 0 if x[0] == socket.AF_INET else 1)
+    last_exc: Exception = OSError(f"Cannot connect to {host}:{port}")
+    for af, socktype, proto, _canonname, sockaddr in infos:
+        try:
+            sock = socket.socket(af, socktype, proto)
+            sock.settimeout(timeout)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            last_exc = exc
+            try:
+                sock.close()
+            except OSError:
+                pass
+    raise last_exc
+
+
 class SSHWorker(QObject):
     """
     Manages the paramiko SSH session.
@@ -155,9 +180,10 @@ class SSHWorker(QObject):
 
     def _connect_kwargs(self) -> dict:
         c = self._conn
+        port = c.effective_port()
         kwargs: dict = {
             "hostname": c.host,
-            "port": c.port,
+            "port": port,
             "username": c.username or None,
             "timeout": 15,
             "allow_agent": True,
@@ -184,10 +210,10 @@ class SSHWorker(QObject):
         if c.jump_host:
             sock = self._open_jump_tunnel(c)
             kwargs["sock"] = sock
-
-        if c.keep_alive_interval > 0:
-            # Will be set on the transport after connect — done in run()
-            pass
+        else:
+            # Pre-resolve the hostname preferring IPv4 to avoid IPv6 link-local
+            # issues with .local / mDNS hostnames (e.g. raspberrypi.local).
+            kwargs["sock"] = _connect_sock(c.host, port, timeout=15)
 
         return kwargs
 
