@@ -255,10 +255,11 @@ class VNCWorker(QObject):
         nlen, = struct.unpack(">I", self._recv_exactly(4))
         self._recv_exactly(nlen)    # server name (ignored)
 
-        # 5. SetPixelFormat: 32bpp, RGBX, little-endian
-        #    red-shift=0, green-shift=8, blue-shift=16
-        #    → in memory: byte0=R, byte1=G, byte2=B, byte3=X
-        #    → matches QImage.Format.Format_RGBX8888
+        # 5. SetPixelFormat: 32bpp, BGRX, little-endian
+        #    red-shift=16, green-shift=8, blue-shift=0
+        #    → in memory: byte0=B, byte1=G, byte2=R, byte3=X(=0)
+        #    → matches QImage.Format.Format_RGB32 (0xffRRGGBB on LE = [B,G,R,FF])
+        #    Using Format_RGB32 (not RGBX8888) avoids macOS treating X=0 as alpha=0.
         pf = struct.pack(
             ">BBBBHHHBBBxxx",
             32,   # bits-per-pixel
@@ -268,9 +269,9 @@ class VNCWorker(QObject):
             255,  # red-max
             255,  # green-max
             255,  # blue-max
-            0,    # red-shift
+            16,   # red-shift
             8,    # green-shift
-            16,   # blue-shift
+            0,    # blue-shift
         )
         self._send(struct.pack(">Bxxx", _MSG_SET_PIXEL_FORMAT) + pf)
 

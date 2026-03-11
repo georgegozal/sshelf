@@ -52,7 +52,7 @@ class _VNCCanvas(QWidget):
         self._fb    = bytearray(width * height * 4)
         self._image = QImage(
             self._fb, width, height,
-            QImage.Format.Format_RGBX8888,
+            QImage.Format.Format_RGB32,
         )
         self.update()
 
