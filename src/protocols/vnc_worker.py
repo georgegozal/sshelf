@@ -388,9 +388,11 @@ class VNCWorker(QObject):
 
             elif msg_type == _MSG_SERVER_CUT_TEXT:
                 self._recv_exactly(3)  # padding
-                raw, = struct.unpack(">I", self._recv_exactly(4))
-                # High bit set = extended clipboard message; lower 31 bits = length
-                length = raw & 0x7FFFFFFF
+                # Read as signed int32: negative value = extended clipboard,
+                # where payload length = abs(value).  E.g. neatvnc sends
+                # -4 (0xFFFFFFFC) for a 4-byte flags-only clipboard message.
+                slen, = struct.unpack(">i", self._recv_exactly(4))
+                length = -slen if slen < 0 else slen
                 if length:
                     self._recv_exactly(length)
 
