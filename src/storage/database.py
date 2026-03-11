@@ -20,8 +20,9 @@ CREATE TABLE IF NOT EXISTS connections (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     name                TEXT    NOT NULL DEFAULT '',
     group_name          TEXT    NOT NULL DEFAULT 'Default',
+    protocol            TEXT    NOT NULL DEFAULT 'ssh',
     host                TEXT    NOT NULL DEFAULT '',
-    port                INTEGER NOT NULL DEFAULT 22,
+    port                INTEGER NOT NULL DEFAULT 0,
     username            TEXT    NOT NULL DEFAULT '',
     password            TEXT    NOT NULL DEFAULT '',
     private_key_file    TEXT    NOT NULL DEFAULT '',
@@ -32,6 +33,11 @@ CREATE TABLE IF NOT EXISTS connections (
     forward_agent       INTEGER NOT NULL DEFAULT 0,
     x11_forward         INTEGER NOT NULL DEFAULT 0,
     compression         INTEGER NOT NULL DEFAULT 0,
+    rdp_domain          TEXT    NOT NULL DEFAULT '',
+    rdp_width           INTEGER NOT NULL DEFAULT 1920,
+    rdp_height          INTEGER NOT NULL DEFAULT 1080,
+    rdp_color_depth     INTEGER NOT NULL DEFAULT 32,
+    vnc_view_only       INTEGER NOT NULL DEFAULT 0,
     notes               TEXT    NOT NULL DEFAULT '',
     tags                TEXT    NOT NULL DEFAULT '',
     color               TEXT    NOT NULL DEFAULT ''
@@ -71,7 +77,32 @@ class Database:
         self._conn = sqlite3.connect(str(self.path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after initial schema (idempotent)."""
+        existing = {
+            r[1]
+            for r in self._conn.execute("PRAGMA table_info(connections)")
+        }
+        new_cols = {
+            "protocol":        "TEXT    NOT NULL DEFAULT 'ssh'",
+            "rdp_domain":      "TEXT    NOT NULL DEFAULT ''",
+            "rdp_width":       "INTEGER NOT NULL DEFAULT 1920",
+            "rdp_height":      "INTEGER NOT NULL DEFAULT 1080",
+            "rdp_color_depth": "INTEGER NOT NULL DEFAULT 32",
+            "vnc_view_only":   "INTEGER NOT NULL DEFAULT 0",
+        }
+        for col, typedef in new_cols.items():
+            if col not in existing:
+                self._conn.execute(
+                    f"ALTER TABLE connections ADD COLUMN {col} {typedef}"
+                )
+        # Migrate legacy port=22 default → 0 so effective_port() works correctly
+        self._conn.execute(
+            "UPDATE connections SET port = 0 WHERE port = 22 AND protocol = 'ssh'"
+        )
 
     # ------------------------------------------------------------------
     # Connection CRUD
@@ -115,28 +146,34 @@ class Database:
         if conn.id is None:
             cur = self._conn.execute(
                 """INSERT INTO connections
-                   (name, group_name, host, port, username, password,
+                   (name, group_name, protocol, host, port, username, password,
                     private_key_file, passphrase, jump_host, startup_command,
-                    keep_alive_interval, forward_agent, x11_forward,
-                    compression, notes, tags, color)
+                    keep_alive_interval, forward_agent, x11_forward, compression,
+                    rdp_domain, rdp_width, rdp_height, rdp_color_depth,
+                    vnc_view_only, notes, tags, color)
                    VALUES
-                   (:name, :group_name, :host, :port, :username, :password,
+                   (:name, :group_name, :protocol, :host, :port, :username, :password,
                     :private_key_file, :passphrase, :jump_host, :startup_command,
-                    :keep_alive_interval, :forward_agent, :x11_forward,
-                    :compression, :notes, :tags, :color)""",
+                    :keep_alive_interval, :forward_agent, :x11_forward, :compression,
+                    :rdp_domain, :rdp_width, :rdp_height, :rdp_color_depth,
+                    :vnc_view_only, :notes, :tags, :color)""",
                 d,
             )
             conn.id = cur.lastrowid
         else:
             self._conn.execute(
                 """UPDATE connections SET
-                   name=:name, group_name=:group_name, host=:host, port=:port,
-                   username=:username, password=:password,
+                   name=:name, group_name=:group_name, protocol=:protocol,
+                   host=:host, port=:port, username=:username, password=:password,
                    private_key_file=:private_key_file, passphrase=:passphrase,
                    jump_host=:jump_host, startup_command=:startup_command,
                    keep_alive_interval=:keep_alive_interval,
                    forward_agent=:forward_agent, x11_forward=:x11_forward,
-                   compression=:compression, notes=:notes, tags=:tags, color=:color
+                   compression=:compression,
+                   rdp_domain=:rdp_domain, rdp_width=:rdp_width,
+                   rdp_height=:rdp_height, rdp_color_depth=:rdp_color_depth,
+                   vnc_view_only=:vnc_view_only,
+                   notes=:notes, tags=:tags, color=:color
                    WHERE id=:id""",
                 d,
             )
