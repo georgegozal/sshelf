@@ -417,21 +417,37 @@ class VNCWorker(QObject):
                 self._blit(x, y, w, h, data)
                 self.frame_updated.emit(x, y, w, h, data)
 
-            elif enc == -223:  # DesktopSize — no pixel data; update dimensions
+            elif enc == -223:  # DesktopSize — no extra data; w,h = new size
                 if w > 0 and h > 0 and (w != self._width or h != self._height):
                     self._width, self._height = w, h
                     self._fb = bytearray(w * h * 4)
 
-            elif enc == -232:  # LastRect — no pixel data; end of update
+            elif enc == -308:  # ExtendedDesktopSize — n_screens header + array
+                n_screens = struct.unpack("B", self._recv_exactly(1))[0]
+                self._recv_exactly(3 + 16 * n_screens)  # pad + per-screen records
+                if w > 0 and h > 0 and (w != self._width or h != self._height):
+                    self._width, self._height = w, h
+                    self._fb = bytearray(w * h * 4)
+
+            elif enc == -307:  # PointerPos — no extra data; x,y in rect header
+                pass
+
+            elif enc == -232:  # LastRect — no extra data; end of update
                 break
 
             elif enc == -239 or enc == -314:  # RichCursor / CursorWithAlpha
-                # pixel data (w*h*4) + bitmask ceil(w/8)*h bytes
+                # pixel data (w*h*4) + 1-bit mask ceil(w/8)*h bytes
                 if w > 0 and h > 0:
                     self._recv_exactly(w * h * 4 + ((w + 7) // 8) * h)
 
+            elif enc == -224:  # XCursor — 4 bytes colours + 2 bitmasks
+                if w > 0 and h > 0:
+                    bitmask = ((w + 7) // 8) * h
+                    self._recv_exactly(4 + 2 * bitmask)
+
             elif enc < 0:
-                # Unknown pseudo-encoding with no known payload — skip silently
+                # Unknown pseudo-encoding — assume no extra payload.
+                # If wrong, the stream will misalign; a reconnect will recover.
                 pass
 
             else:
