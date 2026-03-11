@@ -70,13 +70,14 @@ class _DetachedWindow(QMainWindow):
 class MainWindow(QMainWindow):
     """Top-level application window (Remmina-style split layout)."""
 
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, name: str | None = None) -> None:
         super().__init__()
         self.db = db
         self._detached_windows: list[_DetachedWindow] = []
         self._fullscreen_active = False
 
-        self.setWindowTitle("RemminaMac")
+        title = f"RemminaMac — {name}" if name else "RemminaMac"
+        self.setWindowTitle(title)
         self.setMinimumSize(960, 600)
         self.resize(1200, 720)
 

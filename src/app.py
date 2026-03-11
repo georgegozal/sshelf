@@ -17,7 +17,7 @@ class Application(QApplication):
     APP_VERSION = "0.1.0"
     ORG_NAME = "RemminaMac"
 
-    def __init__(self, argv: list[str]) -> None:
+    def __init__(self, argv: list[str], name: str | None = None) -> None:
         super().__init__(argv)
 
         self.setApplicationName(self.APP_NAME)
@@ -29,7 +29,7 @@ class Application(QApplication):
         font.setPointSize(13)
         self.setFont(font)
 
-        self._launch_main_window()
+        self._launch_main_window(name=name)
 
     # ------------------------------------------------------------------
     # Theme
@@ -86,7 +86,7 @@ class Application(QApplication):
                 app.setStyle("macOS")
             app.setPalette(QPalette())
 
-    def _launch_main_window(self) -> None:
+    def _launch_main_window(self, name: str | None = None) -> None:
         from src.ui.main_window import MainWindow
         from src.storage.database import Database
 
@@ -95,7 +95,7 @@ class Application(QApplication):
         # Apply saved icon theme BEFORE building the main window so all
         # QIcon.fromTheme() calls pick it up from the start.
         self.apply_icon_theme(self._db.get_pref("icon_theme", ""))
-        self._main_window = MainWindow(self._db)
+        self._main_window = MainWindow(self._db, name=name)
         self._main_window.show()
 
         # Clean up DB on exit

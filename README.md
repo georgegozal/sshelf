@@ -133,6 +133,20 @@ source .venv/bin/activate
 python main.py
 ```
 
+### CLI options
+
+| Flag | Description |
+|------|-------------|
+| `-n NAME`, `--name NAME` | Append a custom label to the window title (e.g. `--name Work`) |
+| `-u`, `--upgrade` | Pull the latest version from GitHub and update dependencies, then exit |
+
+Examples:
+
+```bash
+python main.py --name "Work"       # title becomes "RemminaMac — Work"
+python main.py --upgrade           # update in-place and exit
+```
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
