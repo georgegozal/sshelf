@@ -50,21 +50,32 @@ class _VNCCanvas(QWidget):
         self._img_w = width
         self._img_h = height
         self._fb    = bytearray(width * height * 4)
+        # Pre-fill alpha channel to 0xFF (opaque black initial state).
+        # VNC sends X=0 in byte3; we always override it so macOS Core
+        # Graphics never treats it as alpha=0 (transparent → white).
+        self._fb[3::4] = b'\xff' * (width * height)
         self._image = QImage(
-            self._fb, width, height,
-            QImage.Format.Format_RGB32,
+            bytes(self._fb), width, height,
+            QImage.Format.Format_RGBA8888,
         )
         self.update()
 
     def apply_frame(self, x: int, y: int, w: int, h: int, data: bytes) -> None:
-        if self._fb is None or self._image is None:
+        if self._fb is None:
             return
-        stride  = self._img_w * 4
-        row_w   = w * 4
+        stride = self._img_w * 4
+        row_w  = w * 4
         for row in range(h):
             dst = (y + row) * stride + x * 4
             src = row * row_w
             self._fb[dst: dst + row_w] = data[src: src + row_w]
+            # Force alpha bytes to 0xFF (VNC sends X=0; we must override)
+            self._fb[dst + 3: dst + row_w: 4] = b'\xff' * w
+        # Create fresh QImage — guarantees PyQt6 reads updated buffer
+        self._image = QImage(
+            bytes(self._fb), self._img_w, self._img_h,
+            QImage.Format.Format_RGBA8888,
+        )
         self.update()
 
     # ------------------------------------------------------------------
