@@ -107,6 +107,16 @@ _MSG_SERVER_CUT_TEXT   = 3
 _ENC_RAW      = 0
 _ENC_COPYRECT = 1
 
+# VeNCrypt (security type 19) and its sub-types
+_SEC_VEENCRYPT = 19
+_VEC_PLAIN     = 256
+_VEC_TLSNONE   = 257
+_VEC_TLSVNC    = 258
+_VEC_TLSPLAIN  = 259
+_VEC_X509NONE  = 260
+_VEC_X509VNC   = 261
+_VEC_X509PLAIN = 262
+
 
 # ---------------------------------------------------------------------------
 # VNCWorker
@@ -219,24 +229,22 @@ class VNCWorker(QObject):
             raise ConnectionError(f"Server rejected connection: {reason}")
         types = list(self._recv_exactly(n_types))
 
-        if 2 in types and self._conn.password:
-            self._send(bytes([2]))  # VNC Authentication
+        if _SEC_VEENCRYPT in types:          # VeNCrypt TLS wrapper — preferred
+            self._send(bytes([_SEC_VEENCRYPT]))
+            self._do_veencrypt()             # handles its own SecurityResult
+        elif 2 in types and self._conn.password:
+            self._send(bytes([2]))           # VNC Authentication
             challenge = self._recv_exactly(16)
             self._send(_vnc_des(challenge, self._conn.password))
+            self._check_security_result()
         elif 1 in types:
-            self._send(bytes([1]))  # No Authentication
+            self._send(bytes([1]))           # No Authentication
+            self._check_security_result()
         else:
             raise ConnectionError(
                 "No supported security type available (server requires: "
                 + ", ".join(str(t) for t in types) + ")"
             )
-
-        # Security result (RFB 3.8 always sends this)
-        result, = struct.unpack(">I", self._recv_exactly(4))
-        if result != 0:
-            rlen, = struct.unpack(">I", self._recv_exactly(4))
-            reason = self._recv_exactly(rlen).decode("utf-8", errors="replace")
-            raise ConnectionError(f"Authentication failed: {reason}")
 
         # 3. ClientInit — shared=1 (don't disconnect other clients)
         self._send(bytes([1]))
@@ -273,6 +281,87 @@ class VNCWorker(QObject):
         # Allocate framebuffer
         self._fb = bytearray(self._width * self._height * 4)
         self.connected.emit(self._width, self._height)
+
+    # ------------------------------------------------------------------
+    # Security helpers
+    # ------------------------------------------------------------------
+
+    def _check_security_result(self) -> None:
+        """Read and verify the RFB 3.8 SecurityResult message."""
+        result, = struct.unpack(">I", self._recv_exactly(4))
+        if result != 0:
+            try:
+                rlen, = struct.unpack(">I", self._recv_exactly(4))
+                reason = self._recv_exactly(rlen).decode("utf-8", errors="replace")
+            except Exception:
+                reason = "Authentication failed"
+            raise ConnectionError(f"Authentication failed: {reason}")
+
+    def _do_veencrypt(self) -> None:
+        """VeNCrypt (security type 19) sub-protocol: version, sub-type, TLS, auth."""
+        import ssl
+
+        # Version exchange — server sends major.minor, we echo back
+        major, minor = struct.unpack("BB", self._recv_exactly(2))
+        if major != 0 or minor < 2:
+            raise ConnectionError(f"Unsupported VeNCrypt version: {major}.{minor}")
+        self._send(bytes([0, 2]))
+        ack = struct.unpack("B", self._recv_exactly(1))[0]
+        if ack != 0:
+            raise ConnectionError("Server rejected VeNCrypt version 0.2")
+
+        # Sub-type negotiation
+        n = struct.unpack("B", self._recv_exactly(1))[0]
+        subtypes = list(struct.unpack(f">{n}I", self._recv_exactly(n * 4)))
+        chosen = self._choose_veencrypt_subtype(subtypes)
+        if chosen is None:
+            raise ConnectionError(
+                "No supported VeNCrypt sub-type (server offers: "
+                + ", ".join(str(s) for s in subtypes) + ")"
+            )
+        self._send(struct.pack(">I", chosen))
+        ack = struct.unpack("B", self._recv_exactly(1))[0]
+        if ack != 1:
+            raise ConnectionError(f"Server rejected VeNCrypt sub-type {chosen}")
+
+        # Wrap in TLS for all TLS/X509 sub-types (not sub-type 256 Plain)
+        if chosen != _VEC_PLAIN:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            self._sock = ctx.wrap_socket(self._sock)
+
+        # Sub-type authentication
+        if chosen in (_VEC_TLSVNC, _VEC_X509VNC):
+            challenge = self._recv_exactly(16)
+            self._send(_vnc_des(challenge, self._conn.password or ""))
+        elif chosen in (_VEC_TLSPLAIN, _VEC_X509PLAIN, _VEC_PLAIN):
+            uname = (self._conn.username or "").encode("utf-8")
+            passwd = (self._conn.password or "").encode("utf-8")
+            self._send(struct.pack(">II", len(uname), len(passwd)) + uname + passwd)
+        # _VEC_TLSNONE / _VEC_X509NONE: no auth data needed
+
+        # VeNCrypt always sends its own SecurityResult
+        self._check_security_result()
+
+    def _choose_veencrypt_subtype(self, subtypes: list) -> "int | None":
+        """Select best VeNCrypt sub-type from the server-offered list."""
+        if self._conn.password:
+            preference = [
+                _VEC_TLSVNC, _VEC_X509VNC,
+                _VEC_TLSPLAIN, _VEC_X509PLAIN,
+                _VEC_PLAIN, _VEC_TLSNONE, _VEC_X509NONE,
+            ]
+        else:
+            preference = [
+                _VEC_TLSNONE, _VEC_X509NONE,
+                _VEC_TLSVNC, _VEC_X509VNC,
+                _VEC_TLSPLAIN, _VEC_X509PLAIN, _VEC_PLAIN,
+            ]
+        for sub in preference:
+            if sub in subtypes:
+                return sub
+        return None
 
     # ------------------------------------------------------------------
     # Main receive loop
