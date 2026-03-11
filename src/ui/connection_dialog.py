@@ -1,4 +1,4 @@
-"""Add / Edit SSH connection dialog."""
+"""Add / Edit connection dialog — supports SSH, RDP, and VNC."""
 
 from __future__ import annotations
 
@@ -17,37 +17,51 @@ from PyQt6.QtCore import Qt
 from src.storage.database import Database
 from src.models.connection import Connection
 
+# Tab indices (kept as constants so _on_protocol_changed is readable)
+_TAB_BASIC    = 0
+_TAB_AUTH     = 1
+_TAB_ADVANCED = 2   # SSH only
+_TAB_RDP      = 3   # RDP only
+_TAB_VNC      = 4   # VNC only
+_TAB_NOTES    = 5
+
+# Default ports
+_DEFAULT_PORTS = {"ssh": 22, "rdp": 3389, "vnc": 5900}
+
 
 class ConnectionDialog(QDialog):
     """
-    Modal dialog for creating or editing an SSH connection.
+    Modal dialog for creating or editing a connection.
 
     Tabs
     ----
-    Basic      — name, group, host, port, username, colour
-    Auth       — password, private key file, passphrase
-    Advanced   — jump host, startup command, keep-alive,
-                 agent forwarding, X11, compression
+    Basic      — protocol, name, group, host, port, username, colour
+    Auth       — password; SSH key + passphrase (SSH only)
+    Advanced   — jump host, startup cmd, keep-alive, SSH options  (SSH only)
+    RDP Options — domain, resolution, colour depth                (RDP only)
+    VNC Options — view-only checkbox                              (VNC only)
     Notes      — free-text notes
     """
 
     def __init__(
         self,
-        db: Database,
+        db:         Database,
         connection: Optional[Connection] = None,
-        parent: QWidget | None = None,
+        parent:     QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.db = db
+        self.db    = db
         self._conn = connection or Connection()
-        self.saved_connection: Connection = self._conn  # set on accept
+        self.saved_connection: Connection = self._conn
 
         self.setWindowTitle("Edit Connection" if self._conn.id else "New Connection")
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(520)
         self.setModal(True)
 
         self._build_ui()
         self._load_values()
+        # Apply initial protocol state after loading (so port is set correctly)
+        self._on_protocol_changed(self._protocol.currentText().lower())
 
     # ------------------------------------------------------------------
     # UI construction
@@ -63,9 +77,10 @@ class ConnectionDialog(QDialog):
         self._build_basic_tab()
         self._build_auth_tab()
         self._build_advanced_tab()
+        self._build_rdp_tab()
+        self._build_vnc_tab()
         self._build_notes_tab()
 
-        # Buttons
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Cancel
@@ -75,11 +90,21 @@ class ConnectionDialog(QDialog):
         layout.addWidget(btns)
 
     def _build_basic_tab(self) -> None:
-        tab = QWidget()
+        tab  = QWidget()
         form = QFormLayout(tab)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setSpacing(10)
         form.setContentsMargins(16, 16, 16, 16)
+
+        # Protocol selector — first item so it controls everything else
+        self._protocol = QComboBox()
+        self._protocol.addItems(["SSH", "RDP", "VNC"])
+        self._protocol.currentTextChanged.connect(
+            lambda t: self._on_protocol_changed(t.lower())
+        )
+        form.addRow("Protocol:", self._protocol)
+
+        form.addRow(_separator())
 
         self._name = QLineEdit()
         self._name.setPlaceholderText("My Server  (leave empty to use hostname)")
@@ -124,7 +149,7 @@ class ConnectionDialog(QDialog):
         self._tabs.addTab(tab, "Basic")
 
     def _build_auth_tab(self) -> None:
-        tab = QWidget()
+        tab  = QWidget()
         form = QFormLayout(tab)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setSpacing(10)
@@ -132,39 +157,45 @@ class ConnectionDialog(QDialog):
 
         self._password = QLineEdit()
         self._password.setEchoMode(QLineEdit.EchoMode.Password)
-        self._password.setPlaceholderText("Leave blank to use key or agent")
+        self._password.setPlaceholderText("Leave blank to use key or agent (SSH)")
         form.addRow("Password:", self._password)
 
         form.addRow(_separator())
 
-        # Key file row
+        # --- SSH-only section ---
+        self._ssh_auth_sep = _separator()
         key_row = QHBoxLayout()
         self._key_file = QLineEdit()
         self._key_file.setPlaceholderText("~/.ssh/id_rsa")
-        browse_btn = QPushButton("Browse…")
-        browse_btn.setFixedWidth(80)
-        browse_btn.clicked.connect(self._browse_key)
+        self._browse_btn = QPushButton("Browse…")
+        self._browse_btn.setFixedWidth(80)
+        self._browse_btn.clicked.connect(self._browse_key)
         key_row.addWidget(self._key_file)
-        key_row.addWidget(browse_btn)
-        form.addRow("Private Key:", key_row)
+        key_row.addWidget(self._browse_btn)
 
-        self._passphrase = QLineEdit()
+        self._key_label     = QLabel("Private Key:")
+        self._key_widget    = _layout_widget(key_row)
+
+        self._passphrase    = QLineEdit()
         self._passphrase.setEchoMode(QLineEdit.EchoMode.Password)
         self._passphrase.setPlaceholderText("Key passphrase (if any)")
-        form.addRow("Passphrase:", self._passphrase)
+        self._pass_label    = QLabel("Passphrase:")
 
-        note = QLabel(
+        self._ssh_auth_note = QLabel(
             "Tip: if all fields are empty, paramiko will try your SSH agent "
             "and then ~/.ssh/id_rsa / id_ed25519 automatically."
         )
-        note.setWordWrap(True)
-        note.setStyleSheet("color: palette(mid);")
-        form.addRow("", note)
+        self._ssh_auth_note.setWordWrap(True)
+        self._ssh_auth_note.setStyleSheet("color: palette(mid);")
+
+        form.addRow(self._key_label, self._key_widget)
+        form.addRow(self._pass_label, self._passphrase)
+        form.addRow("", self._ssh_auth_note)
 
         self._tabs.addTab(tab, "Auth")
 
     def _build_advanced_tab(self) -> None:
-        tab = QWidget()
+        tab  = QWidget()
         form = QFormLayout(tab)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setSpacing(10)
@@ -200,8 +231,77 @@ class ConnectionDialog(QDialog):
 
         self._tabs.addTab(tab, "Advanced")
 
+    def _build_rdp_tab(self) -> None:
+        tab  = QWidget()
+        form = QFormLayout(tab)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(10)
+        form.setContentsMargins(16, 16, 16, 16)
+
+        self._rdp_domain = QLineEdit()
+        self._rdp_domain.setPlaceholderText("CORP  (leave empty for local account)")
+        form.addRow("Domain:", self._rdp_domain)
+
+        form.addRow(_separator())
+
+        # Resolution
+        res_row = QHBoxLayout()
+        self._rdp_width = QSpinBox()
+        self._rdp_width.setRange(640, 7680)
+        self._rdp_width.setValue(1920)
+        self._rdp_width.setSuffix(" px")
+        res_row.addWidget(self._rdp_width)
+        res_row.addWidget(QLabel("×"))
+        self._rdp_height = QSpinBox()
+        self._rdp_height.setRange(480, 4320)
+        self._rdp_height.setValue(1080)
+        self._rdp_height.setSuffix(" px")
+        res_row.addWidget(self._rdp_height)
+        res_row.addStretch()
+        form.addRow("Resolution:", _layout_widget(res_row))
+
+        self._rdp_depth = QComboBox()
+        for d in ("8-bit", "16-bit", "24-bit", "32-bit"):
+            self._rdp_depth.addItem(d)
+        self._rdp_depth.setCurrentIndex(3)  # 32-bit
+        form.addRow("Colour depth:", self._rdp_depth)
+
+        form.addRow(_separator())
+
+        note = QLabel(
+            "Requires xfreerdp on macOS/Linux (brew install freerdp) "
+            "or uses mstsc.exe on Windows."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: palette(mid);")
+        form.addRow("", note)
+
+        self._tabs.addTab(tab, "RDP Options")
+
+    def _build_vnc_tab(self) -> None:
+        tab  = QWidget()
+        form = QFormLayout(tab)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(10)
+        form.setContentsMargins(16, 16, 16, 16)
+
+        self._vnc_view_only = QCheckBox("View only (no keyboard or mouse input)")
+        form.addRow("Mode:", self._vnc_view_only)
+
+        form.addRow(_separator())
+
+        note = QLabel(
+            "Password (set in the Auth tab) is the VNC password used for "
+            "authentication.  Leave blank for unauthenticated servers."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: palette(mid);")
+        form.addRow("", note)
+
+        self._tabs.addTab(tab, "VNC Options")
+
     def _build_notes_tab(self) -> None:
-        tab = QWidget()
+        tab    = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.addWidget(QLabel("Free-text notes for this connection:"))
@@ -211,20 +311,61 @@ class ConnectionDialog(QDialog):
         self._tabs.addTab(tab, "Notes")
 
     # ------------------------------------------------------------------
+    # Protocol switching
+    # ------------------------------------------------------------------
+
+    def _on_protocol_changed(self, protocol: str) -> None:
+        """Show/hide tabs and adjust defaults when the protocol changes."""
+        is_ssh = protocol == "ssh"
+        is_rdp = protocol == "rdp"
+        is_vnc = protocol == "vnc"
+
+        # Tab visibility
+        self._tabs.setTabVisible(_TAB_ADVANCED, is_ssh)
+        self._tabs.setTabVisible(_TAB_RDP,      is_rdp)
+        self._tabs.setTabVisible(_TAB_VNC,      is_vnc)
+
+        # SSH-only auth fields
+        for w in (self._key_label, self._key_widget,
+                  self._pass_label, self._passphrase,
+                  self._ssh_auth_note):
+            w.setVisible(is_ssh)
+
+        # Password label changes by protocol
+        if is_vnc:
+            self._password.setPlaceholderText("VNC password (leave blank for none)")
+        elif is_rdp:
+            self._password.setPlaceholderText("RDP password")
+        else:
+            self._password.setPlaceholderText("Leave blank to use key or agent")
+
+        # Update port default if still at a known default value
+        current_port = self._port.value()
+        for p in _DEFAULT_PORTS.values():
+            if current_port == p:
+                self._port.setValue(_DEFAULT_PORTS[protocol])
+                break
+
+    # ------------------------------------------------------------------
     # Load / save values
     # ------------------------------------------------------------------
 
     def _load_values(self) -> None:
         c = self._conn
-        self._name.setText(c.name)
 
-        # Populate group combo and select current
+        # Protocol
+        proto_map = {"ssh": "SSH", "rdp": "RDP", "vnc": "VNC"}
+        idx = self._protocol.findText(proto_map.get(c.protocol, "SSH"))
+        if idx >= 0:
+            self._protocol.setCurrentIndex(idx)
+
+        self._name.setText(c.name)
         if c.group and c.group not in [self._group.itemText(i) for i in range(self._group.count())]:
             self._group.addItem(c.group)
         self._group.setCurrentText(c.group)
 
         self._host.setText(c.host)
-        self._port.setValue(c.port)
+        self._port.setValue(c.port if c.port else _DEFAULT_PORTS.get(c.protocol, 22))
         self._username.setText(c.username)
         self._colour_value = c.color
         self._apply_colour_btn()
@@ -239,28 +380,53 @@ class ConnectionDialog(QDialog):
         self._agent_forward.setChecked(c.forward_agent)
         self._x11.setChecked(c.x11_forward)
         self._compress.setChecked(c.compression)
+
+        self._rdp_domain.setText(c.rdp_domain)
+        self._rdp_width.setValue(c.rdp_width)
+        self._rdp_height.setValue(c.rdp_height)
+        depth_idx = {8: 0, 16: 1, 24: 2, 32: 3}.get(c.rdp_color_depth, 3)
+        self._rdp_depth.setCurrentIndex(depth_idx)
+
+        self._vnc_view_only.setChecked(c.vnc_view_only)
+
         self._notes.setPlainText(c.notes)
 
     def _save_values(self) -> None:
         c = self._conn
-        c.name = self._name.text().strip()
-        c.group = self._group.currentText().strip() or "Default"
-        c.host = self._host.text().strip()
-        c.port = self._port.value()
-        c.username = self._username.text().strip()
-        c.color = self._colour_value
+        c.protocol  = self._protocol.currentText().lower()
+        c.name      = self._name.text().strip()
+        c.group     = self._group.currentText().strip() or "Default"
+        c.host      = self._host.text().strip()
+        c.port      = self._port.value()
+        c.username  = self._username.text().strip()
+        c.color     = self._colour_value
 
-        c.password = self._password.text()
-        c.private_key_file = self._key_file.text().strip()
-        c.passphrase = self._passphrase.text()
+        c.password  = self._password.text()
 
-        c.jump_host = self._jump_host.text().strip()
-        c.startup_command = self._startup_cmd.text().strip()
+        # SSH
+        c.private_key_file   = self._key_file.text().strip()
+        c.passphrase         = self._passphrase.text()
+        c.jump_host          = self._jump_host.text().strip()
+        c.startup_command    = self._startup_cmd.text().strip()
         c.keep_alive_interval = self._keep_alive.value()
-        c.forward_agent = self._agent_forward.isChecked()
-        c.x11_forward = self._x11.isChecked()
-        c.compression = self._compress.isChecked()
+        c.forward_agent      = self._agent_forward.isChecked()
+        c.x11_forward        = self._x11.isChecked()
+        c.compression        = self._compress.isChecked()
+
+        # RDP
+        c.rdp_domain      = self._rdp_domain.text().strip()
+        c.rdp_width       = self._rdp_width.value()
+        c.rdp_height      = self._rdp_height.value()
+        c.rdp_color_depth = [8, 16, 24, 32][self._rdp_depth.currentIndex()]
+
+        # VNC
+        c.vnc_view_only = self._vnc_view_only.isChecked()
+
         c.notes = self._notes.toPlainText().strip()
+
+        # Store 0 when port equals the protocol default (cleaner display)
+        if c.port == _DEFAULT_PORTS.get(c.protocol, 22):
+            c.port = 0
 
     # ------------------------------------------------------------------
     # Validation and accept
@@ -293,7 +459,7 @@ class ConnectionDialog(QDialog):
 
     def _pick_colour(self) -> None:
         initial = QColor(self._colour_value) if self._colour_value else QColor("#4caf50")
-        colour = QColorDialog.getColor(initial, self, "Choose Connection Colour")
+        colour  = QColorDialog.getColor(initial, self, "Choose Connection Colour")
         if colour.isValid():
             self._colour_value = colour.name()
             self._apply_colour_btn()
@@ -309,9 +475,19 @@ class ConnectionDialog(QDialog):
             )
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _separator() -> QFrame:
-    """Thin horizontal rule for form layout visual grouping."""
     line = QFrame()
     line.setFrameShape(QFrame.Shape.HLine)
     line.setFrameShadow(QFrame.Shadow.Sunken)
     return line
+
+
+def _layout_widget(layout: QHBoxLayout) -> QWidget:
+    """Wrap an HBoxLayout in a plain QWidget so it can be added to QFormLayout."""
+    w = QWidget()
+    w.setLayout(layout)
+    return w
