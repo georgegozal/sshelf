@@ -358,24 +358,36 @@ class MainWindow(QMainWindow):
             self._tabs.setCurrentIndex(0)
 
     def _open_terminal(self, conn: Connection) -> None:
-        """Open a new terminal tab for conn; switch to existing tab if already open."""
+        """Open a new tab for conn; switch to existing tab if already open."""
         from src.ui.split_view import SplitView
+        from src.ui.rdp_widget import RDPWidget
+        from src.ui.vnc_widget import VNCWidget
+
+        # Protocol → view class + tab label prefix + Linux theme icon
+        _VIEW = {
+            "rdp": (RDPWidget, "🖥 ", "computer"),
+            "vnc": (VNCWidget, "🖱 ", "network-wired"),
+        }
+        ViewClass, icon_prefix, theme_key = _VIEW.get(
+            conn.protocol, (SplitView, "🔑 ", "utilities-terminal")
+        )
 
         # If a tab for this connection is already open, just switch to it
         if conn.id is not None:
             for i in range(1, self._tabs.count()):
                 w = self._tabs.widget(i)
-                if isinstance(w, SplitView) and w.matches_conn(conn):
+                if hasattr(w, "matches_conn") and w.matches_conn(conn):
                     self._tabs.setCurrentIndex(i)
                     return
 
-        view = SplitView(conn, db=self.db, parent=self)
+        view = ViewClass(conn, db=self.db, parent=self)
         view.status_message.connect(self.set_status)
         view.health_changed.connect(self._tree.set_health)
         view.all_closed.connect(lambda v=view: self._on_split_view_closed(v))
 
-        tab_icon = QIcon.fromTheme("utilities-terminal") if _LINUX else QIcon()
-        idx = self._tabs.addTab(view, tab_icon, f"{'🔑 ' if not _LINUX else ''}{conn.display_name()}")
+        tab_icon = QIcon.fromTheme(theme_key) if _LINUX else QIcon()
+        label = f"{'' if _LINUX else icon_prefix}{conn.display_name()}"
+        idx = self._tabs.addTab(view, tab_icon, label)
         if conn.color:
             self._tabs.tabBar().setTabTextColor(idx, QColor(conn.color))
         self._tabs.setCurrentIndex(idx)
@@ -501,11 +513,14 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _parse_quick_connect(text: str) -> Connection:
-        """Parse 'user@host:port' into a transient Connection."""
+        """Parse 'user@host:port' or 'rdp://host:port' into a transient Connection."""
         conn = Connection()
-        # strip optional ssh:// scheme
-        if text.startswith("ssh://"):
-            text = text[6:]
+        # Detect protocol from scheme
+        for scheme in ("ssh://", "rdp://", "vnc://"):
+            if text.lower().startswith(scheme):
+                conn.protocol = scheme[:3]
+                text = text[len(scheme):]
+                break
         if "@" in text:
             conn.username, rest = text.split("@", 1)
         else:

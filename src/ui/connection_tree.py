@@ -182,17 +182,26 @@ class ConnectionTree(QWidget):
                 elif self._filter_text:
                     g_item.setExpanded(True)
 
+            # Protocol-specific emoji prefix and Linux theme icon
+            _PROTO_EMOJI  = {"rdp": "🖥", "vnc": "🖱"}
+            _PROTO_THEME  = {"rdp": "computer", "vnc": "network-wired"}
+            proto         = conn.protocol if conn.protocol else "ssh"
+            emoji         = _PROTO_EMOJI.get(proto, "🔑")
+            theme_key     = _PROTO_THEME.get(proto, "dialog-password")
+
             c_item = QTreeWidgetItem()
-            c_item.setText(0, f"  {'🔑  ' if not _LINUX else ''}{conn.display_name()}")
+            c_item.setText(0, f"  {'' if _LINUX else emoji + '  '}{conn.display_name()}")
             c_item.setText(1, conn.connection_string())
             c_item.setFlags(_CONN_FLAGS)
             c_item.setData(0, Qt.ItemDataRole.UserRole, conn)
             c_item.setToolTip(0, conn.notes or conn.connection_string())
-            # On Linux use a freedesktop theme key icon instead of emoji
+            # On Linux use a freedesktop theme icon
             if _LINUX:
-                key_icon = QIcon.fromTheme("dialog-password")
-                if not key_icon.isNull():
-                    c_item.setIcon(0, key_icon)
+                icon = QIcon.fromTheme(theme_key)
+                if icon.isNull():
+                    icon = QIcon.fromTheme("dialog-password")
+                if not icon.isNull():
+                    c_item.setIcon(0, icon)
 
             # Colour dot using the connection's assigned colour
             if conn.color:
