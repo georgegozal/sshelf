@@ -255,11 +255,11 @@ class VNCWorker(QObject):
         nlen, = struct.unpack(">I", self._recv_exactly(4))
         self._recv_exactly(nlen)    # server name (ignored)
 
-        # 5. SetPixelFormat: 32bpp, BGRX, little-endian
-        #    red-shift=16, green-shift=8, blue-shift=0
-        #    → in memory: byte0=B, byte1=G, byte2=R, byte3=X(=0)
-        #    → matches QImage.Format.Format_RGB32 (0xffRRGGBB on LE = [B,G,R,FF])
-        #    Using Format_RGB32 (not RGBX8888) avoids macOS treating X=0 as alpha=0.
+        # 5. SetPixelFormat: 32bpp, RGBX, little-endian
+        #    red-shift=0, green-shift=8, blue-shift=16
+        #    → in memory: byte0=R, byte1=G, byte2=B, byte3=X(=0)
+        #    Canvas forces byte3=0xFF and uses Format_RGBA8888 to avoid
+        #    macOS Core Graphics treating X=0 as alpha=0 (transparent).
         pf = struct.pack(
             ">BBBBHHHBBBxxx",
             32,   # bits-per-pixel
@@ -269,9 +269,9 @@ class VNCWorker(QObject):
             255,  # red-max
             255,  # green-max
             255,  # blue-max
-            16,   # red-shift
+            0,    # red-shift
             8,    # green-shift
-            0,    # blue-shift
+            16,   # blue-shift
         )
         self._send(struct.pack(">Bxxx", _MSG_SET_PIXEL_FORMAT) + pf)
 
@@ -388,8 +388,11 @@ class VNCWorker(QObject):
 
             elif msg_type == _MSG_SERVER_CUT_TEXT:
                 self._recv_exactly(3)  # padding
-                length, = struct.unpack(">I", self._recv_exactly(4))
-                self._recv_exactly(length)
+                raw, = struct.unpack(">I", self._recv_exactly(4))
+                # High bit set = extended clipboard message; lower 31 bits = length
+                length = raw & 0x7FFFFFFF
+                if length:
+                    self._recv_exactly(length)
 
             else:
                 raise ConnectionError(f"Unknown server message type: {msg_type}")
@@ -412,8 +415,25 @@ class VNCWorker(QObject):
                 self._blit(x, y, w, h, data)
                 self.frame_updated.emit(x, y, w, h, data)
 
+            elif enc == -223:  # DesktopSize — no pixel data; update dimensions
+                if w > 0 and h > 0 and (w != self._width or h != self._height):
+                    self._width, self._height = w, h
+                    self._fb = bytearray(w * h * 4)
+
+            elif enc == -232:  # LastRect — no pixel data; end of update
+                break
+
+            elif enc == -239 or enc == -314:  # RichCursor / CursorWithAlpha
+                # pixel data (w*h*4) + bitmask ceil(w/8)*h bytes
+                if w > 0 and h > 0:
+                    self._recv_exactly(w * h * 4 + ((w + 7) // 8) * h)
+
+            elif enc < 0:
+                # Unknown pseudo-encoding with no known payload — skip silently
+                pass
+
             else:
-                # Unknown encoding — can't recover, the stream is now misaligned
+                # Unknown data encoding — stream is misaligned, must disconnect
                 raise ConnectionError(f"Unsupported encoding: {enc}")
 
     # ------------------------------------------------------------------
