@@ -2,7 +2,7 @@
 
 ## Overview
 
-RemminaMac follows a layered architecture with a clear separation between storage, protocol handling, and UI.
+RemminaMac follows a layered architecture with a clear separation between storage, protocol handling, UI, and optional plugins.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -20,6 +20,12 @@ RemminaMac follows a layered architecture with a clear separation between storag
 ┌────────────────────▼─────────────────────────────────────────┐
 │                     Storage layer                            │
 │            Database (SQLite)   Keychain (macOS)              │
+└──────────────────────────────────────────────────────────────┘
+                     │
+┌────────────────────▼─────────────────────────────────────────┐
+│               Optional protocol plugins                      │
+│        src/plugins/rdp/   src/plugins/vnc/                   │
+│   (disabled by default; enable in Preferences → Features)    │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -183,3 +189,89 @@ This isolates the split-pane logic from the terminal emulator itself. `TerminalW
 
 **Why `thread.wait()` in `_on_finished`?**
 `thread.quit()` is asynchronous — it posts a quit message to the thread's event loop but returns immediately. If the `TerminalWidget` is deleted before the OS thread actually stops, Qt aborts with "QThread: Destroyed while thread is still running". Calling `thread.wait(2000)` after `quit()` ensures the join completes before any `deleteLater()` can fire.
+
+---
+
+## Optional protocol plugins
+
+RDP and VNC support lives in `src/plugins/` and is **disabled by default**.  Only SSH is active out of the box.
+
+```
+src/plugins/
+├── rdp/
+│   ├── __init__.py   # exports RDPWidget
+│   ├── widget.py     # RDPWidget — status panel, reconnect bar
+│   └── worker.py     # RDPWorker — launches xfreerdp / mstsc subprocess
+└── vnc/
+    ├── __init__.py   # exports VNCWidget
+    ├── widget.py     # VNCWidget + _VNCCanvas — live framebuffer display
+    └── worker.py     # VNCWorker — pure-Python RFB 3.8 client
+```
+
+Enable a protocol in **Preferences → Optional Protocols**.  When enabled, the protocol appears in the connection dialog's Protocol dropdown.  The plugin code is loaded lazily (`from src.plugins.rdp import RDPWidget`) — it is never imported when the plugin is disabled.
+
+**RDP requirements:** `xfreerdp` (macOS: `brew install freerdp`, Ubuntu: `apt install freerdp2-x11`) or the built-in `mstsc.exe` on Windows.
+
+**VNC requirements:** none — the worker is a pure-Python RFB 3.8 implementation.
+
+---
+
+## Terminal side panel features
+
+The right-side panel inside each SSH terminal tab contains three optional sub-panels.  Each can be disabled individually in **Preferences → Terminal Features**.
+
+### ⚡ Commands (Snippets)
+
+`src/ui/snippets_panel.py` — a list of saved commands you can send to the terminal with a double-click or the **Send** button.
+
+**Use case:** store frequently-typed commands (`sudo systemctl restart nginx`, `docker ps -a`, etc.) and send them in one click instead of typing.  Snippets can be **global** (visible in every session) or **per-connection**.
+
+Snippets are stored in the `snippets` table in SQLite.  Export and import are available via the ↑ / ↓ buttons in the panel header (JSON format).
+
+### 📁 SFTP file browser
+
+`src/ui/sftp_panel.py` — a two-pane file manager (local ↔ remote) that opens an SFTP session on the existing SSH connection 800 ms after connect.
+
+### 🔀 Port forwarding (SSH Tunnels)
+
+`src/ui/tunnel_panel.py` — manages SSH port-forwarding rules for the session.
+
+**What is port forwarding?**  SSH can forward TCP ports through the encrypted SSH connection, without exposing those ports directly to the network.
+
+| Direction | What it does | Example |
+|-----------|-------------|---------|
+| **Local** | `localhost:LOCAL_PORT` → `REMOTE_HOST:REMOTE_PORT` (via SSH host) | Access a remote database (`db.internal:5432`) from `localhost:5432` — the DB is behind the firewall, but the SSH host can reach it. |
+| **Remote** | `SSH_HOST:REMOTE_PORT` → `localhost:LOCAL_PORT` | Expose your local dev server (`localhost:3000`) on port `8080` of the remote server so colleagues can preview it. |
+
+Tunnel rules are stored in the `tunnels` table and started/stopped by `LocalTunnelWorker` / `RemoteTunnelWorker` in `src/protocols/tunnel_worker.py`.
+
+---
+
+## JSON backup and restore
+
+**File → Export Connections as JSON…** serialises all saved connections to a portable JSON file.  Passwords can optionally be included (plain text — use with care).
+
+**File → Import Connections from JSON…** reads the file back and adds new connections to the database.  Connections that already exist (same name + host) are skipped.
+
+The JSON format is:
+
+```json
+{
+  "version": "1.0",
+  "app": "RemminaMac",
+  "exported_at": "2026-03-12T10:00:00",
+  "connections": [
+    {
+      "name": "My Server",
+      "group": "Production",
+      "protocol": "ssh",
+      "host": "example.com",
+      "port": 0,
+      "username": "deploy",
+      ...
+    }
+  ]
+}
+```
+
+Command snippets have their own JSON export/import via the ↑ / ↓ buttons in the ⚡ Commands panel.
