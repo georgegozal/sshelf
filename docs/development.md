@@ -41,17 +41,26 @@ remminamac/
     │   ├── base.py                  Abstract base for protocol workers
     │   ├── ssh.py                   SSHWorker: paramiko in a QThread
     │   └── tunnel_worker.py         LocalTunnelWorker + RemoteTunnelWorker
+    ├── plugins/                     Optional protocol plugins (disabled by default)
+    │   ├── rdp/
+    │   │   ├── __init__.py          exports RDPWidget
+    │   │   ├── widget.py            RDPWidget — status panel, reconnect bar
+    │   │   └── worker.py            RDPWorker — launches xfreerdp / mstsc subprocess
+    │   └── vnc/
+    │       ├── __init__.py          exports VNCWidget
+    │       ├── widget.py            VNCWidget + _VNCCanvas — live framebuffer display
+    │       └── worker.py            VNCWorker — pure-Python RFB 3.8 client
     └── ui/
         ├── main_window.py           Main window + tab manager + tray + broadcast
         ├── connection_tree.py       Left panel: grouped connection list + health dots
-        ├── connection_dialog.py     Add / edit connection dialog
+        ├── connection_dialog.py     Add / edit connection dialog (protocol list is dynamic)
         ├── terminal_widget.py       Embedded VT100 terminal (pyte + QPlainTextEdit)
         ├── split_view.py            Horizontal split container for multiple terminal panes
         ├── command_palette.py       Cmd+P fuzzy-search command palette
         ├── welcome_widget.py        Home tab: welcome screen + connection detail
-        ├── preferences_dialog.py    App preferences (theme, icon theme, terminal theme)
+        ├── preferences_dialog.py    App preferences (theme, icon theme, terminal theme, feature toggles)
         ├── ssh_config_import_dialog.py  ~/.ssh/config import UI
-        ├── snippets_panel.py        Command snippets side panel
+        ├── snippets_panel.py        Command snippets side panel (⚡) + JSON export/import
         ├── sftp_panel.py            SFTP file browser side panel
         ├── tunnel_panel.py          Port-forwarding side panel
         ├── themes.py                Built-in terminal color themes (Theme dataclass)
@@ -67,10 +76,59 @@ remminamac/
 
 ## Adding a new protocol
 
+Protocols that are always active belong in `src/protocols/`.  Optional protocols go in `src/plugins/<name>/` and are enabled via Preferences → Optional Protocols.
+
+**For a built-in protocol:**
 1. Create `src/protocols/<name>.py` with a worker class that subclasses `src/protocols/base.py`.
 2. The worker must emit the same signals as `SSHWorker`: `connected`, `data_received(bytes)`, `error(str)`, `finished`.
-3. Add a `protocol` field to the `Connection` model.
-4. In `TerminalWidget.start_connection()`, select the worker class based on `conn.protocol`.
+3. In `MainWindow`, import and wire up the new tab widget.
+
+**For an optional plugin:**
+1. Create `src/plugins/<name>/worker.py` (the QThread worker) and `src/plugins/<name>/widget.py` (the tab widget).
+2. Create `src/plugins/<name>/__init__.py` that exports the widget class.
+3. Add a preference key `enable_<name>` defaulting to `"0"` in `database.py`.
+4. In `preferences_dialog.py`, add a checkbox under "Optional Protocols" that reads/writes the preference.
+5. In `connection_dialog.py`, append the protocol name to `_protocols` only when the preference is `"1"`.
+6. In `main_window.py`, lazy-import the plugin widget inside the `_open_terminal()` branch:
+   ```python
+   from src.plugins.<name> import <Name>Widget
+   ```
+7. The plugin widget must expose the same interface as `SplitView`:
+   - Signals: `all_closed`, `health_changed(int, str)`, `status_message(str)`
+   - Method: `shutdown()`  `matches_conn(conn) → bool`
+
+## Feature toggles
+
+Individual UI features can be enabled or disabled via **Preferences → Terminal Features**.  The preference keys and their defaults are:
+
+| Key | Default | Controls |
+|-----|---------|---------|
+| `enable_rdp` | `"0"` | RDP protocol option in connection dialog |
+| `enable_vnc` | `"0"` | VNC protocol option in connection dialog |
+| `feature_broadcast` | `"1"` | Broadcast input (📡) button in toolbar |
+| `feature_logging` | `"1"` | Session logging (⏺) button in terminal header |
+| `feature_snippets` | `"1"` | ⚡ Commands side panel tab |
+| `feature_sftp` | `"1"` | 📁 SFTP file browser side panel tab |
+| `feature_tunnels` | `"1"` | 🔀 Port forwarding side panel tab |
+
+All values are stored in the `preferences` table as `"0"` / `"1"` strings.  Read them with `db.get_pref(key, default)`.
+
+Side panel tabs are added conditionally at widget creation time in `TerminalWidget._build_ui()` using a `_tab_idx` counter — never use hardcoded indices when accessing side panel tabs.
+
+---
+
+## CLI flags
+
+```
+python main.py [-n SUFFIX] [-u]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n SUFFIX` / `--name SUFFIX` | Append a custom suffix to the window title |
+| `-u` / `--upgrade` | Run `git pull` + `pip install -r requirements.txt` then launch |
+
+---
 
 ## Coding conventions
 

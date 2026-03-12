@@ -83,6 +83,17 @@ This is equivalent to `ssh -J jump_host target_host`. The jump host connection u
 
 ---
 
+## JSON connection export
+
+**File → Export Connections as JSON…** offers to include passwords in the export file.
+
+- If you choose **No** (default): passwords are omitted and the export is safe to share.
+- If you choose **Yes**: passwords are written as **plain text** in the JSON file.  Treat the resulting file like a password file — store it securely, do not commit it to version control, and delete it when no longer needed.
+
+The import path (**File → Import Connections from JSON…**) reads passwords from the JSON and stores them in Keychain, just as if the connection had been saved manually.
+
+---
+
 ## Known limitations
 
 - **No SSH certificate support** — paramiko's certificate authentication is not yet wired up.
