@@ -412,7 +412,8 @@ class MainWindow(QMainWindow):
         self.set_status(f"Connecting to {conn.connection_string()}…")
         if hasattr(self, "_tray"):
             self._refresh_tray_menu()
-        if hasattr(self, "_broadcast_active") and self._broadcast_active:
+        if (hasattr(self, "_broadcast_active") and self._broadcast_active
+                and self.db.get_pref("feature_broadcast", "0") == "1"):
             self._rewire_broadcast()
 
     def _on_split_view_closed(self, view) -> None:
@@ -587,7 +588,8 @@ class MainWindow(QMainWindow):
             ("⚙  Preferences…",                            "Ctrl+,",  self._on_preferences),
             ("📥  Import ~/.ssh/config…",                  "",         self._on_import_ssh_config),
             (f"{_ico('🔑', 'K')}  Generate SSH Key…",     "",         self._on_generate_key),
-            ("📡  Toggle Broadcast Input",                  "",         lambda: self._btn_broadcast.toggle()),
+            *([("📡  Toggle Broadcast Input", "", lambda: self._btn_broadcast.toggle())]
+              if self.db.get_pref("feature_broadcast", "0") == "1" else []),
             ("⬛  Toggle Fullscreen",                       "Ctrl+↩",  lambda: self._on_toggle_fullscreen(
                                                                             not self._fullscreen_active)),
         ]
@@ -603,9 +605,9 @@ class MainWindow(QMainWindow):
 
     def _on_preferences(self) -> None:
         from src.ui.preferences_dialog import PreferencesDialog
-        # PreferencesDialog._apply() already calls _apply_terminal_theme_from_prefs()
-        # and _refresh_icons() on self (the parent), so no extra work needed here.
         PreferencesDialog(self.db, self).exec()
+        # Re-apply after dialog closes so feature visibility is always up-to-date.
+        self._apply_feature_prefs()
 
     def _refresh_icons(self) -> None:
         """
