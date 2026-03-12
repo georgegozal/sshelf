@@ -96,9 +96,14 @@ class ConnectionDialog(QDialog):
         form.setSpacing(10)
         form.setContentsMargins(16, 16, 16, 16)
 
-        # Protocol selector — first item so it controls everything else
+        # Protocol selector — only shows protocols enabled in Preferences → Features
         self._protocol = QComboBox()
-        self._protocol.addItems(["SSH", "RDP", "VNC"])
+        _protocols = ["SSH"]
+        if self.db.get_pref("enable_rdp", "0") == "1":
+            _protocols.append("RDP")
+        if self.db.get_pref("enable_vnc", "0") == "1":
+            _protocols.append("VNC")
+        self._protocol.addItems(_protocols)
         self._protocol.currentTextChanged.connect(
             lambda t: self._on_protocol_changed(t.lower())
         )

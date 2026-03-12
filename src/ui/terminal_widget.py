@@ -421,33 +421,35 @@ class TerminalWidget(QWidget):
         self._log_btn.clicked.connect(self._toggle_logging)
         _apply_icon(self._log_btn, "media-record", "●")
         hbar.addWidget(self._log_btn)
+        if self._db and self._db.get_pref("feature_logging", "1") != "1":
+            self._log_btn.hide()
 
         # Commands / snippets toggle (⚡ is BMP, but system-run is cleaner on Linux)
         self._btn_cmds = QPushButton("" if _LINUX else "⚡")
         self._btn_cmds.setToolTip("Commands panel")
         self._btn_cmds.setFixedSize(26, 26)
         self._btn_cmds.setStyleSheet(self._hdr_btn_style())
-        self._btn_cmds.clicked.connect(lambda: self._show_side_tab(0))
         _apply_icon(self._btn_cmds, "system-run", "⚡")
         hbar.addWidget(self._btn_cmds)
+        # connection wired below after side panel tabs are counted
 
         # SFTP toggle (📁 is emoji → folder theme icon)
         self._btn_sftp = QPushButton("" if _LINUX else "📁")
         self._btn_sftp.setToolTip("SFTP file browser")
         self._btn_sftp.setFixedSize(26, 26)
         self._btn_sftp.setStyleSheet(self._hdr_btn_style())
-        self._btn_sftp.clicked.connect(lambda: self._show_side_tab(1))
         _apply_icon(self._btn_sftp, "folder", "/")
         hbar.addWidget(self._btn_sftp)
+        # connection wired below after side panel tabs are counted
 
         # Tunnel panel toggle (🔀 is emoji → network icon)
         self._btn_tunnels = QPushButton("" if _LINUX else "🔀")
         self._btn_tunnels.setToolTip("Port forwarding tunnels")
         self._btn_tunnels.setFixedSize(26, 26)
         self._btn_tunnels.setStyleSheet(self._hdr_btn_style())
-        self._btn_tunnels.clicked.connect(lambda: self._show_side_tab(2))
         _apply_icon(self._btn_tunnels, "network-transmit-receive", "⇄")
         hbar.addWidget(self._btn_tunnels)
+        # connection wired below after side panel tabs are counted
 
         # Split pane (⊞ is BMP U+229E — renders fine in standard Linux fonts)
         btn_split = QPushButton("⊞")
@@ -537,49 +539,86 @@ class TerminalWidget(QWidget):
         )
         sp_layout.addWidget(self._side_tabs)
 
-        from src.ui.snippets_panel import SnippetsPanel
-        self._snippets_panel = SnippetsPanel(
-            db=self._db,
-            conn_id=self._conn.id,
-            parent=self,
-        )
-        self._snippets_panel.send_command.connect(
-            lambda cmd: self._on_key(cmd.encode("utf-8", errors="replace"))
-        )
-        if _LINUX:
-            self._side_tabs.addTab(
-                self._snippets_panel,
-                QIcon.fromTheme("system-run"),
-                "Commands",
-            )
-        else:
-            self._side_tabs.addTab(self._snippets_panel, "⚡ Commands")
+        # Read feature prefs (default all on when db unavailable)
+        _db = self._db
+        _feat_snippets = (not _db) or _db.get_pref("feature_snippets", "1") == "1"
+        _feat_sftp     = (not _db) or _db.get_pref("feature_sftp",     "1") == "1"
+        _feat_tunnels  = (not _db) or _db.get_pref("feature_tunnels",  "1") == "1"
 
-        from src.ui.sftp_panel import SFTPPanel
-        self._sftp_panel = SFTPPanel(self)
-        if _LINUX:
-            self._side_tabs.addTab(
-                self._sftp_panel,
-                QIcon.fromTheme("folder"),
-                "SFTP",
-            )
-        else:
-            self._side_tabs.addTab(self._sftp_panel, "📁 SFTP")
+        _tab_idx = 0  # tracks actual index as we conditionally add tabs
 
-        from src.ui.tunnel_panel import TunnelPanel
-        self._tunnel_panel = TunnelPanel(
-            db=self._db,
-            conn_id=self._conn.id,
-            parent=self,
-        )
-        if _LINUX:
-            self._side_tabs.addTab(
-                self._tunnel_panel,
-                QIcon.fromTheme("network-transmit-receive"),
-                "Tunnels",
+        # ── Snippets tab ─────────────────────────────────────────────────────
+        if _feat_snippets:
+            from src.ui.snippets_panel import SnippetsPanel
+            self._snippets_panel = SnippetsPanel(
+                db=self._db,
+                conn_id=self._conn.id,
+                parent=self,
+            )
+            self._snippets_panel.send_command.connect(
+                lambda cmd: self._on_key(cmd.encode("utf-8", errors="replace"))
+            )
+            if _LINUX:
+                self._side_tabs.addTab(
+                    self._snippets_panel,
+                    QIcon.fromTheme("system-run"),
+                    "Commands",
+                )
+            else:
+                self._side_tabs.addTab(self._snippets_panel, "⚡ Commands")
+            _cmds_idx = _tab_idx
+            _tab_idx += 1
+            self._btn_cmds.clicked.connect(
+                lambda checked=False, i=_cmds_idx: self._show_side_tab(i)
             )
         else:
-            self._side_tabs.addTab(self._tunnel_panel, "🔀 Tunnels")
+            self._snippets_panel = None
+            self._btn_cmds.hide()
+
+        # ── SFTP tab ──────────────────────────────────────────────────────────
+        if _feat_sftp:
+            from src.ui.sftp_panel import SFTPPanel
+            self._sftp_panel = SFTPPanel(self)
+            if _LINUX:
+                self._side_tabs.addTab(
+                    self._sftp_panel,
+                    QIcon.fromTheme("folder"),
+                    "SFTP",
+                )
+            else:
+                self._side_tabs.addTab(self._sftp_panel, "📁 SFTP")
+            _sftp_idx = _tab_idx
+            _tab_idx += 1
+            self._btn_sftp.clicked.connect(
+                lambda checked=False, i=_sftp_idx: self._show_side_tab(i)
+            )
+        else:
+            self._sftp_panel = None
+            self._btn_sftp.hide()
+
+        # ── Tunnels tab ───────────────────────────────────────────────────────
+        if _feat_tunnels:
+            from src.ui.tunnel_panel import TunnelPanel
+            self._tunnel_panel = TunnelPanel(
+                db=self._db,
+                conn_id=self._conn.id,
+                parent=self,
+            )
+            if _LINUX:
+                self._side_tabs.addTab(
+                    self._tunnel_panel,
+                    QIcon.fromTheme("network-transmit-receive"),
+                    "Tunnels",
+                )
+            else:
+                self._side_tabs.addTab(self._tunnel_panel, "🔀 Tunnels")
+            _tunnels_idx = _tab_idx
+            self._btn_tunnels.clicked.connect(
+                lambda checked=False, i=_tunnels_idx: self._show_side_tab(i)
+            )
+        else:
+            self._tunnel_panel = None
+            self._btn_tunnels.hide()
 
         self._content_splitter.addWidget(self._side_panel)
         self._side_panel.hide()
@@ -725,7 +764,7 @@ class TerminalWidget(QWidget):
             if index == 1:
                 if self._worker:
                     self._detect_cwd_async()
-                elif self._remote_cwd:
+                elif self._remote_cwd and self._sftp_panel:
                     self._sftp_panel.navigate_to(self._remote_cwd)
 
     def refresh_icons(self) -> None:
@@ -747,9 +786,13 @@ class TerminalWidget(QWidget):
         _apply_icon(self._btn_cmds,    "system-run",                "⚡")
         _apply_icon(self._btn_sftp,    "folder",                    "/")
         _apply_icon(self._btn_tunnels, "network-transmit-receive",  "⇄")
-        # Refresh side-panel tab icons
-        self._side_tabs.setTabIcon(0, QIcon.fromTheme("system-run"))
-        self._side_tabs.setTabIcon(1, QIcon.fromTheme("folder"))
+        # Refresh side-panel tab icons (indices depend on which tabs are enabled)
+        for i in range(self._side_tabs.count()):
+            txt = self._side_tabs.tabText(i)
+            if "Commands" in txt or "⚡" in txt:
+                self._side_tabs.setTabIcon(i, QIcon.fromTheme("system-run"))
+            elif "SFTP" in txt or "📁" in txt:
+                self._side_tabs.setTabIcon(i, QIcon.fromTheme("folder"))
         self._side_tabs.setTabIcon(2, QIcon.fromTheme("network-transmit-receive"))
 
     # ── Per-connection font size ──────────────────────────────────────────────
@@ -792,7 +835,8 @@ class TerminalWidget(QWidget):
         if not cwd:
             return
         self._remote_cwd = cwd
-        self._sftp_panel.navigate_to(cwd)
+        if self._sftp_panel:
+            self._sftp_panel.navigate_to(cwd)
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
@@ -848,12 +892,14 @@ class TerminalWidget(QWidget):
         self._stats_timer.timeout.connect(self._update_stats)
         self._stats_timer.start()
         # Open SFTP in background 800 ms after connect (non-blocking)
-        QTimer.singleShot(800, self._setup_sftp)
+        if self._sftp_panel:
+            QTimer.singleShot(800, self._setup_sftp)
         # Start port-forwarding tunnels
-        self._tunnel_panel.set_worker(self._worker)
+        if self._tunnel_panel:
+            self._tunnel_panel.set_worker(self._worker)
 
     def _setup_sftp(self) -> None:
-        if not self._worker:
+        if not self._worker or not self._sftp_panel:
             return
         self._sftp_thread = QThread(self)
         self._sftp_worker = _OpenSFTPWorker(self._worker)
@@ -903,7 +949,8 @@ class TerminalWidget(QWidget):
         if self._stats_timer:
             self._stats_timer.stop()
             self._stats_timer = None
-        self._tunnel_panel.set_worker(None)
+        if self._tunnel_panel:
+            self._tunnel_panel.set_worker(None)
         if self._closing:
             # User clicked Disconnect while thread was running — close tab now.
             self._do_close()
@@ -974,7 +1021,8 @@ class TerminalWidget(QWidget):
             except OSError:
                 pass
             self._log_file = None
-        self._tunnel_panel.set_worker(None)
+        if self._tunnel_panel:
+            self._tunnel_panel.set_worker(None)
         if self._worker:
             self._worker.disconnect()
         if self._thread:

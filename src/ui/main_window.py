@@ -95,6 +95,9 @@ class MainWindow(QMainWindow):
         # Apply saved terminal theme
         self._apply_terminal_theme_from_prefs()
 
+        # Apply feature visibility prefs (broadcast button, etc.)
+        self._apply_feature_prefs()
+
     # ------------------------------------------------------------------
     # Menu bar
     # ------------------------------------------------------------------
@@ -129,6 +132,20 @@ class MainWindow(QMainWindow):
             act_keygen.setIcon(QIcon.fromTheme("dialog-password"))
         act_keygen.triggered.connect(self._on_generate_key)
         file_menu.addAction(act_keygen)
+
+        file_menu.addSeparator()
+
+        act_export = QAction("📤 &Export Connections as JSON…" if not _LINUX else "&Export Connections as JSON…", self)
+        if _LINUX:
+            act_export.setIcon(QIcon.fromTheme("document-save-as"))
+        act_export.triggered.connect(self._on_export_connections)
+        file_menu.addAction(act_export)
+
+        act_import_json = QAction("📥 &Import Connections from JSON…" if not _LINUX else "&Import Connections from JSON…", self)
+        if _LINUX:
+            act_import_json.setIcon(QIcon.fromTheme("document-open"))
+        act_import_json.triggered.connect(self._on_import_connections)
+        file_menu.addAction(act_import_json)
 
         file_menu.addSeparator()
 
@@ -360,8 +377,8 @@ class MainWindow(QMainWindow):
     def _open_terminal(self, conn: Connection) -> None:
         """Open a new tab for conn; switch to existing tab if already open."""
         from src.ui.split_view import SplitView
-        from src.ui.rdp_widget import RDPWidget
-        from src.ui.vnc_widget import VNCWidget
+        from src.plugins.rdp import RDPWidget
+        from src.plugins.vnc import VNCWidget
 
         # Protocol → view class + tab label prefix + Linux theme icon
         _VIEW = {
@@ -637,6 +654,136 @@ class MainWindow(QMainWindow):
             if isinstance(w, SplitView):
                 for t in w.get_terminals():
                     t._output.refresh_theme()
+
+    def _apply_feature_prefs(self) -> None:
+        """Show/hide toolbar features based on saved preference flags."""
+        if self.db.get_pref("feature_broadcast", "1") != "1":
+            self._btn_broadcast.hide()
+        else:
+            self._btn_broadcast.show()
+
+    # ── JSON backup / restore ─────────────────────────────────────────────────
+
+    def _on_export_connections(self) -> None:
+        """Export all connections to a JSON file (Preferences → File menu)."""
+        import datetime
+        from pathlib import Path
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
+        reply = QMessageBox.question(
+            self, "Include passwords?",
+            "Include passwords in the export file?\n\n"
+            "⚠  Passwords will be saved as plain text in the JSON file.\n"
+            "Only do this on a trusted, private machine.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        include_pw = reply == QMessageBox.StandardButton.Yes
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Connections",
+            str(Path.home() / "remminamac-connections.json"),
+            "JSON files (*.json)",
+        )
+        if not path:
+            return
+
+        conns = self.db.all_connections()
+
+        def _conn_dict(c):
+            d = c.to_dict()
+            d.pop("id", None)
+            d["group"] = d.pop("group_name", "Default")
+            if not include_pw:
+                d.pop("password", None)
+                d.pop("passphrase", None)
+            return d
+
+        data = {
+            "version": "1.0",
+            "app": "RemminaMac",
+            "exported_at": datetime.datetime.now().isoformat(),
+            "connections": [_conn_dict(c) for c in conns],
+        }
+        try:
+            Path(path).write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except OSError as exc:
+            QMessageBox.critical(self, "Export failed", str(exc))
+            return
+        QMessageBox.information(
+            self, "Export complete",
+            f"Exported {len(conns)} connection(s) to:\n{path}",
+        )
+
+    def _on_import_connections(self) -> None:
+        """Import connections from a JSON file previously exported by RemminaMac."""
+        from pathlib import Path
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Connections",
+            str(Path.home()),
+            "JSON files (*.json)",
+        )
+        if not path:
+            return
+
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            QMessageBox.critical(self, "Import failed", f"Could not read file:\n{exc}")
+            return
+
+        if not isinstance(data, dict) or "connections" not in data:
+            QMessageBox.critical(
+                self, "Import failed",
+                "File does not look like a RemminaMac export\n"
+                "(missing 'connections' key).",
+            )
+            return
+
+        conns_data = data["connections"]
+        if not isinstance(conns_data, list):
+            QMessageBox.critical(self, "Import failed", "Invalid format.")
+            return
+
+        existing = {(c.name, c.host) for c in self.db.all_connections()}
+        new_items = [
+            d for d in conns_data
+            if isinstance(d, dict) and
+               (d.get("name", ""), d.get("host", "")) not in existing
+        ]
+        skip_count = len(conns_data) - len(new_items)
+
+        msg = f"Found {len(conns_data)} connection(s) in the file.\n"
+        if skip_count:
+            msg += f"{skip_count} already exist (same name + host) — will be skipped.\n"
+        msg += f"\nImport {len(new_items)} new connection(s)?"
+
+        reply = QMessageBox.question(
+            self, "Import Connections", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        for d in new_items:
+            d.pop("id", None)
+            # Support both 'group' (export key) and 'group_name' (DB key)
+            if "group" in d and "group_name" not in d:
+                d["group_name"] = d.pop("group")
+            try:
+                conn = Connection.from_dict(d)
+                self.db.save_connection(conn)
+            except Exception:
+                pass  # skip malformed entries silently
+
+        self._tree.reload()
+        QMessageBox.information(
+            self, "Import complete",
+            f"Imported {len(new_items)} connection(s).",
+        )
 
     # ── Broadcast input ───────────────────────────────────────────────────────
 

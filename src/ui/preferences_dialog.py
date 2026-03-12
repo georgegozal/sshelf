@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QDialogButtonBox,
-    QSpinBox, QCheckBox, QLabel, QComboBox,
+    QSpinBox, QCheckBox, QLabel, QComboBox, QFrame,
 )
 from PyQt6.QtCore import Qt
 
@@ -49,6 +49,18 @@ def _list_icon_themes() -> list[str]:
         except OSError:
             pass
     return [_SYSTEM_DEFAULT] + sorted(seen, key=str.casefold)
+
+
+def _section_separator(title: str) -> QLabel:
+    """Bold section header label — used as a section divider in the dialog."""
+    lbl = QLabel(title)
+    lbl.setStyleSheet(
+        "font-weight: bold; color: palette(mid); "
+        "border-top: 1px solid palette(mid); "
+        "padding-top: 8px; margin-top: 4px;"
+    )
+    lbl.setContentsMargins(16, 0, 16, 0)
+    return lbl
 
 
 class PreferencesDialog(QDialog):
@@ -115,6 +127,85 @@ class PreferencesDialog(QDialog):
 
         layout.addLayout(form)
 
+        # ── Features & Plugins ────────────────────────────────────────────────
+        layout.addWidget(_section_separator("Optional Protocols"))
+
+        proto_form = QFormLayout()
+        proto_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        proto_form.setSpacing(8)
+        proto_form.setContentsMargins(16, 4, 16, 4)
+
+        self._enable_rdp = QCheckBox()
+        self._enable_rdp.setChecked(db.get_pref("enable_rdp", "0") == "1")
+        self._enable_rdp.setToolTip(
+            "Show RDP (Remote Desktop) as a protocol option when adding connections.\n"
+            "Requires xfreerdp on macOS/Linux or uses built-in mstsc on Windows."
+        )
+        proto_form.addRow("Enable RDP support:", self._enable_rdp)
+
+        self._enable_vnc = QCheckBox()
+        self._enable_vnc.setChecked(db.get_pref("enable_vnc", "0") == "1")
+        self._enable_vnc.setToolTip(
+            "Show VNC as a protocol option when adding connections.\n"
+            "Pure Python RFB 3.8 client — no external software needed."
+        )
+        proto_form.addRow("Enable VNC support:", self._enable_vnc)
+
+        layout.addLayout(proto_form)
+
+        layout.addWidget(_section_separator("Terminal Features"))
+
+        feat_form = QFormLayout()
+        feat_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        feat_form.setSpacing(8)
+        feat_form.setContentsMargins(16, 4, 16, 4)
+
+        self._feat_broadcast = QCheckBox()
+        self._feat_broadcast.setChecked(db.get_pref("feature_broadcast", "1") == "1")
+        self._feat_broadcast.setToolTip(
+            "Show the 📡 Broadcast button in the toolbar.\n"
+            "Broadcast mirrors your keystrokes to ALL open terminal sessions at once.\n"
+            "Useful for running the same command on multiple servers simultaneously."
+        )
+        feat_form.addRow("Broadcast input (📡):", self._feat_broadcast)
+
+        self._feat_logging = QCheckBox()
+        self._feat_logging.setChecked(db.get_pref("feature_logging", "1") == "1")
+        self._feat_logging.setToolTip(
+            "Show the ⏺ Session Logging button in terminal tabs.\n"
+            "Saves everything printed in the terminal to a plain-text file."
+        )
+        feat_form.addRow("Session logging (⏺):", self._feat_logging)
+
+        self._feat_snippets = QCheckBox()
+        self._feat_snippets.setChecked(db.get_pref("feature_snippets", "1") == "1")
+        self._feat_snippets.setToolTip(
+            "Show the ⚡ Commands panel button in terminal tabs.\n"
+            "Lets you save frequently-used commands and send them with one click.\n"
+            "Example: save 'sudo systemctl restart nginx' as 'Restart Nginx'."
+        )
+        feat_form.addRow("Commands / Snippets (⚡):", self._feat_snippets)
+
+        self._feat_sftp = QCheckBox()
+        self._feat_sftp.setChecked(db.get_pref("feature_sftp", "1") == "1")
+        self._feat_sftp.setToolTip(
+            "Show the 📁 SFTP panel button in terminal tabs.\n"
+            "Built-in file browser for uploading/downloading files over SSH."
+        )
+        feat_form.addRow("SFTP file browser (📁):", self._feat_sftp)
+
+        self._feat_tunnels = QCheckBox()
+        self._feat_tunnels.setChecked(db.get_pref("feature_tunnels", "1") == "1")
+        self._feat_tunnels.setToolTip(
+            "Show the 🔀 Port Forwarding panel button in terminal tabs.\n"
+            "SSH tunnels let you securely forward network ports through the SSH connection.\n"
+            "Example: forward localhost:5432 → remote-db:5432 so your local DB client\n"
+            "can reach a database that is not exposed to the internet."
+        )
+        feat_form.addRow("Port forwarding / Tunnels (🔀):", self._feat_tunnels)
+
+        layout.addLayout(feat_form)
+
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Apply |
@@ -149,6 +240,17 @@ class PreferencesDialog(QDialog):
             self.db.set_pref("icon_theme", it_name)
             Application.apply_icon_theme(it_name)
 
+        # Optional protocols
+        self.db.set_pref("enable_rdp", "1" if self._enable_rdp.isChecked() else "0")
+        self.db.set_pref("enable_vnc", "1" if self._enable_vnc.isChecked() else "0")
+
+        # Feature flags
+        self.db.set_pref("feature_broadcast", "1" if self._feat_broadcast.isChecked() else "0")
+        self.db.set_pref("feature_logging",   "1" if self._feat_logging.isChecked() else "0")
+        self.db.set_pref("feature_snippets",  "1" if self._feat_snippets.isChecked() else "0")
+        self.db.set_pref("feature_sftp",      "1" if self._feat_sftp.isChecked() else "0")
+        self.db.set_pref("feature_tunnels",   "1" if self._feat_tunnels.isChecked() else "0")
+
         # Ask the main window to refresh terminal colours and icons
         win = self.parent()
         if win is not None:
@@ -156,6 +258,8 @@ class PreferencesDialog(QDialog):
                 win._apply_terminal_theme_from_prefs()
             if hasattr(win, "_refresh_icons"):
                 win._refresh_icons()
+            if hasattr(win, "_apply_feature_prefs"):
+                win._apply_feature_prefs()
 
     def _save(self) -> None:
         """Apply all settings and close the dialog (OK button)."""
