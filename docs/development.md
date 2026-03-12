@@ -105,11 +105,11 @@ Individual UI features can be enabled or disabled via **Preferences → Terminal
 |-----|---------|---------|
 | `enable_rdp` | `"0"` | RDP protocol option in connection dialog |
 | `enable_vnc` | `"0"` | VNC protocol option in connection dialog |
-| `feature_broadcast` | `"1"` | Broadcast input (📡) button in toolbar |
-| `feature_logging` | `"1"` | Session logging (⏺) button in terminal header |
+| `feature_broadcast` | `"0"` | Broadcast input (📡) button in toolbar |
+| `feature_logging` | `"0"` | Session logging (⏺) button in terminal header |
 | `feature_snippets` | `"1"` | ⚡ Commands side panel tab |
 | `feature_sftp` | `"1"` | 📁 SFTP file browser side panel tab |
-| `feature_tunnels` | `"1"` | 🔀 Port forwarding side panel tab |
+| `feature_tunnels` | `"0"` | 🔀 Port forwarding side panel tab |
 
 All values are stored in the `preferences` table as `"0"` / `"1"` strings.  Read them with `db.get_pref(key, default)`.
 

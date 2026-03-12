@@ -421,7 +421,7 @@ class TerminalWidget(QWidget):
         self._log_btn.clicked.connect(self._toggle_logging)
         _apply_icon(self._log_btn, "media-record", "●")
         hbar.addWidget(self._log_btn)
-        if self._db and self._db.get_pref("feature_logging", "1") != "1":
+        if self._db and self._db.get_pref("feature_logging", "0") != "1":
             self._log_btn.hide()
 
         # Commands / snippets toggle (⚡ is BMP, but system-run is cleaner on Linux)
@@ -543,7 +543,7 @@ class TerminalWidget(QWidget):
         _db = self._db
         _feat_snippets = (not _db) or _db.get_pref("feature_snippets", "1") == "1"
         _feat_sftp     = (not _db) or _db.get_pref("feature_sftp",     "1") == "1"
-        _feat_tunnels  = (not _db) or _db.get_pref("feature_tunnels",  "1") == "1"
+        _feat_tunnels  = (not _db) or _db.get_pref("feature_tunnels",  "0") == "1"
 
         _tab_idx = 0  # tracks actual index as we conditionally add tabs
 

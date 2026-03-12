@@ -161,7 +161,7 @@ class PreferencesDialog(QDialog):
         feat_form.setContentsMargins(16, 4, 16, 4)
 
         self._feat_broadcast = QCheckBox()
-        self._feat_broadcast.setChecked(db.get_pref("feature_broadcast", "1") == "1")
+        self._feat_broadcast.setChecked(db.get_pref("feature_broadcast", "0") == "1")
         self._feat_broadcast.setToolTip(
             "Show the 📡 Broadcast button in the toolbar.\n"
             "Broadcast mirrors your keystrokes to ALL open terminal sessions at once.\n"
@@ -170,7 +170,7 @@ class PreferencesDialog(QDialog):
         feat_form.addRow("Broadcast input (📡):", self._feat_broadcast)
 
         self._feat_logging = QCheckBox()
-        self._feat_logging.setChecked(db.get_pref("feature_logging", "1") == "1")
+        self._feat_logging.setChecked(db.get_pref("feature_logging", "0") == "1")
         self._feat_logging.setToolTip(
             "Show the ⏺ Session Logging button in terminal tabs.\n"
             "Saves everything printed in the terminal to a plain-text file."
@@ -195,7 +195,7 @@ class PreferencesDialog(QDialog):
         feat_form.addRow("SFTP file browser (📁):", self._feat_sftp)
 
         self._feat_tunnels = QCheckBox()
-        self._feat_tunnels.setChecked(db.get_pref("feature_tunnels", "1") == "1")
+        self._feat_tunnels.setChecked(db.get_pref("feature_tunnels", "0") == "1")
         self._feat_tunnels.setToolTip(
             "Show the 🔀 Port Forwarding panel button in terminal tabs.\n"
             "SSH tunnels let you securely forward network ports through the SSH connection.\n"

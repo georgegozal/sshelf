@@ -657,7 +657,7 @@ class MainWindow(QMainWindow):
 
     def _apply_feature_prefs(self) -> None:
         """Show/hide toolbar features based on saved preference flags."""
-        if self.db.get_pref("feature_broadcast", "1") != "1":
+        if self.db.get_pref("feature_broadcast", "0") != "1":
             self._btn_broadcast.hide()
         else:
             self._btn_broadcast.show()
