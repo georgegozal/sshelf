@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 
 from src.models.connection import Connection
 from src.storage.database import Database
-from src.protocols.vnc_worker import VNCWorker, qt_key_to_keysym
+from .worker import VNCWorker, qt_key_to_keysym
 
 
 # ---------------------------------------------------------------------------

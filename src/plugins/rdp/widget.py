@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 
 from src.models.connection import Connection
 from src.storage.database import Database
-from src.protocols.rdp_worker import RDPWorker
+from .worker import RDPWorker
 
 
 class RDPWidget(QWidget):
