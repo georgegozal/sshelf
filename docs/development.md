@@ -162,7 +162,7 @@ Keychain entries are not removed by this. Delete them in **Keychain Access.app**
 
 Terminal themes are defined in `src/ui/themes.py` as frozen `Theme` dataclasses. To add a new theme:
 
-1. Add a `Theme(...)` instance to `_THEMES` in `themes.py`.
+1. Add a `Theme(...)` instance to `THEMES` in `themes.py`.
 2. It will automatically appear in the Preferences → Terminal Theme dropdown.
 
 The active theme is applied at startup by `apply_terminal_theme()` in `terminal_widget.py`. To switch themes at runtime, call `apply_terminal_theme(theme)` and then `refresh_theme()` on each open `_PyteTerminal`.

@@ -4,7 +4,7 @@
 
 ### How it works
 
-Passwords are stored in the **macOS Keychain**, not in SQLite.
+Passwords are stored in the **OS keychain**, not in SQLite.
 
 When a connection is saved:
 1. The password is extracted from the `Connection` object in memory.
@@ -73,8 +73,8 @@ This is equivalent to `ssh -J jump_host target_host`. The jump host connection u
 
 | Data | Storage | Notes |
 |------|---------|-------|
-| Passwords | macOS Keychain | Secure |
-| Passphrases | macOS Keychain | Secure |
+| Passwords | OS keychain (macOS Keychain / GNOME Keyring / Windows Credential Manager) | Secure |
+| Passphrases | OS keychain (macOS Keychain / GNOME Keyring / Windows Credential Manager) | Secure |
 | SSH key files | Filesystem (your path) | sshelf only stores the path, not the key content |
 | Usernames | SQLite (plaintext) | Not sensitive |
 | Hostnames / IPs | SQLite (plaintext) | Not sensitive |

@@ -38,7 +38,7 @@ A Remmina-inspired SSH connection manager for macOS, Linux, and Windows, built w
 - Auto-connects on the existing SSH session (no second login needed)
 
 ### Terminal color themes
-- Five built-in themes: **One Dark**, **Dracula**, **Solarized Dark**, **Nord**, **Gruvbox Dark**
+- 13 built-in themes: **One Dark**, **Dracula**, **Solarized Dark**, **Nord**, **Gruvbox Dark**, **Tokyo Night**, **Catppuccin Mocha**, **Monokai**, **Palenight**, **Ayu Dark**, **Solarized Light**, **One Light**, **GitHub Light**
 - Switch themes in Preferences — applied live to all open terminals
 
 ### SSH key management
@@ -143,7 +143,7 @@ python main.py
 Examples:
 
 ```bash
-python main.py --name "Work"       # title becomes "sshelf — Work"
+python main.py --name "Work"       # title becomes "SSHelf — Work"
 python main.py --upgrade           # update in-place and exit
 ```
 
@@ -239,5 +239,5 @@ Detailed documentation lives in the [`docs/`](docs/) folder:
 
 ## License
 
-sshelf is free software released under the **GNU General Public License v3.0**.
+sshelf is free software released under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
 See [LICENSE](LICENSE) for the full text.
