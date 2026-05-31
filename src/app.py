@@ -13,7 +13,7 @@ _LINUX = sys.platform.startswith("linux")
 class Application(QApplication):
     """sshelf application."""
 
-    APP_NAME = "sshelf"
+    APP_NAME = "SSHelf"
     APP_VERSION = "0.1.0"
     ORG_NAME = "sshelf"
 

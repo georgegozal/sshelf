@@ -76,7 +76,7 @@ class MainWindow(QMainWindow):
         self._detached_windows: list[_DetachedWindow] = []
         self._fullscreen_active = False
 
-        title = f"sshelf — {name}" if name else "sshelf"
+        title = f"SSHelf — {name}" if name else "SSHelf"
         self.setWindowTitle(title)
         self.setMinimumSize(960, 600)
         self.resize(1200, 720)
@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
 
         # Help
         help_menu: QMenu = mb.addMenu("&Help")
-        act_about = QAction("&About sshelf", self)
+        act_about = QAction("&About SSHelf", self)
         act_about.triggered.connect(self._on_about)
         help_menu.addAction(act_about)
 
@@ -832,8 +832,8 @@ class MainWindow(QMainWindow):
 
     def _on_about(self) -> None:
         QMessageBox.about(
-            self, "About sshelf",
-            "<b>sshelf 0.1.0</b><br><br>"
+            self, "About SSHelf",
+            "<b>SSHelf 0.1.0</b><br><br>"
             "A Remmina-inspired SSH connection manager for macOS.<br><br>"
             "Built with Python, PyQt6, and paramiko.",
         )
@@ -885,7 +885,7 @@ class MainWindow(QMainWindow):
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
         self._tray = QSystemTrayIcon(self._make_tray_icon(), self)
-        self._tray.setToolTip("sshelf")
+        self._tray.setToolTip("SSHelf")
         self._tray.activated.connect(self._on_tray_activated)
         self._tray_menu = QMenu()
         self._tray.setContextMenu(self._tray_menu)
@@ -897,7 +897,7 @@ class MainWindow(QMainWindow):
         m = self._tray_menu
         m.clear()
 
-        act_show = QAction("Show sshelf", self)
+        act_show = QAction("Show SSHelf", self)
         act_show.triggered.connect(self._bring_to_front)
         m.addAction(act_show)
 
@@ -924,7 +924,7 @@ class MainWindow(QMainWindow):
                     recent_menu.addAction(act)
 
         m.addSeparator()
-        act_quit = QAction("Quit sshelf", self)
+        act_quit = QAction("Quit SSHelf", self)
         act_quit.triggered.connect(QApplication.quit)
         m.addAction(act_quit)
 
@@ -961,7 +961,7 @@ class MainWindow(QMainWindow):
             return
         self._tabs.removeTab(index)
         widget.setParent(None)  # type: ignore[arg-type]
-        _DetachedWindow(widget, f"sshelf — {label}", self._detached_windows)
+        _DetachedWindow(widget, f"SSHelf — {label}", self._detached_windows)
 
     # ------------------------------------------------------------------
     # Close / persist state
