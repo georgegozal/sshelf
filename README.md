@@ -1,4 +1,4 @@
-# sshelf
+# SSHelf
 
 A Remmina-inspired SSH connection manager for macOS, Linux, and Windows, built with Python and PyQt6.
 
