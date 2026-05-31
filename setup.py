@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="remminamac",
+    name="sshelf",
     version="0.1.0",
     description="Remmina-inspired SSH connection manager for macOS",
     packages=find_packages(exclude=["tests*"]),
@@ -13,7 +13,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "remminamac=main:main",
+            "sshelf=main:main",
         ],
     },
 )

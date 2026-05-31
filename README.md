@@ -1,8 +1,8 @@
-# RemminaMac
+# sshelf
 
 A Remmina-inspired SSH connection manager for macOS, Linux, and Windows, built with Python and PyQt6.
 
-![RemminaMac screenshot](assets/screenshot.png)
+![sshelf screenshot](assets/screenshot.png)
 
 ## Features
 
@@ -89,15 +89,15 @@ Python dependencies (installed via `pip install -r requirements.txt`):
 ### One-line install (macOS and Linux)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/georgegozal/remminamac/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/georgegozal/sshelf/main/install.sh | bash
 ```
 
-Clones the repo to `~/.local/share/remminamac`, creates a venv, installs dependencies, and puts a `remminamac` launcher in `~/.local/bin`. On Linux it also creates a `.desktop` file so RemminaMac appears in your application menu.
+Clones the repo to `~/.local/share/sshelf`, creates a venv, installs dependencies, and puts a `sshelf` launcher in `~/.local/bin`. On Linux it also creates a `.desktop` file so sshelf appears in your application menu.
 
 To uninstall:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/georgegozal/remminamac/main/uninstall.sh | bash
+curl -sSL https://raw.githubusercontent.com/georgegozal/sshelf/main/uninstall.sh | bash
 ```
 
 ### Install (Windows)
@@ -105,16 +105,16 @@ curl -sSL https://raw.githubusercontent.com/georgegozal/remminamac/main/uninstal
 Open PowerShell and run:
 
 ```powershell
-iwr https://raw.githubusercontent.com/georgegozal/remminamac/main/install.ps1 -OutFile install.ps1
+iwr https://raw.githubusercontent.com/georgegozal/sshelf/main/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-Clones the repo to `%LOCALAPPDATA%\remminamac`, creates a venv, installs dependencies, and creates a `remminamac.bat` launcher. Optionally adds the install directory to your user PATH.
+Clones the repo to `%LOCALAPPDATA%\sshelf`, creates a venv, installs dependencies, and creates a `sshelf.bat` launcher. Optionally adds the install directory to your user PATH.
 
 To uninstall:
 
 ```powershell
-iwr https://raw.githubusercontent.com/georgegozal/remminamac/main/uninstall.ps1 -OutFile uninstall.ps1
+iwr https://raw.githubusercontent.com/georgegozal/sshelf/main/uninstall.ps1 -OutFile uninstall.ps1
 powershell -ExecutionPolicy Bypass -File uninstall.ps1
 ```
 
@@ -143,7 +143,7 @@ python main.py
 Examples:
 
 ```bash
-python main.py --name "Work"       # title becomes "RemminaMac — Work"
+python main.py --name "Work"       # title becomes "sshelf — Work"
 python main.py --upgrade           # update in-place and exit
 ```
 
@@ -173,7 +173,7 @@ python main.py --upgrade           # update in-place and exit
 ## Project structure
 
 ```
-remminamac/
+sshelf/
 ├── main.py                          Entry point — creates QApplication, Database, MainWindow
 ├── requirements.txt
 ├── install.sh                       One-line installer (macOS + Linux)
@@ -218,10 +218,10 @@ remminamac/
 
 | Data | Location |
 |------|----------|
-| Connection metadata (macOS) | `~/Library/Application Support/RemminaMac/connections.db` |
-| Connection metadata (Linux) | `~/.local/share/RemminaMac/connections.db` |
-| Connection metadata (Windows) | `%APPDATA%\RemminaMac\connections.db` |
-| Passwords & passphrases | OS keychain (service: `RemminaMac`) — see Security section |
+| Connection metadata (macOS) | `~/Library/Application Support/sshelf/connections.db` |
+| Connection metadata (Linux) | `~/.local/share/sshelf/connections.db` |
+| Connection metadata (Windows) | `%APPDATA%\sshelf\connections.db` |
+| Passwords & passphrases | OS keychain (service: `sshelf`) — see Security section |
 | Preferences | Same SQLite database, `preferences` table |
 | Snippets | Same SQLite database, `snippets` table |
 | Tunnel rules | Same SQLite database, `tunnels` table |
@@ -239,5 +239,5 @@ Detailed documentation lives in the [`docs/`](docs/) folder:
 
 ## License
 
-RemminaMac is free software released under the **GNU General Public License v3.0**.
+sshelf is free software released under the **GNU General Public License v3.0**.
 See [LICENSE](LICENSE) for the full text.

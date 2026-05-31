@@ -1,10 +1,10 @@
-# RemminaMac installer -- Windows (PowerShell)
+# sshelf installer -- Windows (PowerShell)
 # Usage: powershell -ExecutionPolicy Bypass -File install.ps1
 #Requires -Version 5.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$REPO_URL   = "https://github.com/georgegozal/remminamac.git"
+$REPO_URL   = "https://github.com/georgegozal/sshelf.git"
 
 # -- Detect if running from inside an already-cloned repo ---------------------
 $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -12,18 +12,18 @@ if ((Test-Path "$SCRIPT_DIR\main.py") -and (Test-Path "$SCRIPT_DIR\requirements.
     $INSTALL_DIR = $SCRIPT_DIR
     $IN_REPO     = $true
 } else {
-    $INSTALL_DIR = "$env:LOCALAPPDATA\remminamac"
+    $INSTALL_DIR = "$env:LOCALAPPDATA\sshelf"
     $IN_REPO     = $false
 }
 
 $BIN_DIR  = $INSTALL_DIR
-$LAUNCHER = "$INSTALL_DIR\remminamac.bat"
+$LAUNCHER = "$INSTALL_DIR\sshelf.bat"
 
-function Info  { param($msg) Write-Host "[remminamac] $msg" -ForegroundColor Green }
-function Warn  { param($msg) Write-Host "[remminamac] $msg" -ForegroundColor Yellow }
-function Err   { param($msg) Write-Host "[remminamac] ERROR: $msg" -ForegroundColor Red; exit 1 }
+function Info  { param($msg) Write-Host "[sshelf] $msg" -ForegroundColor Green }
+function Warn  { param($msg) Write-Host "[sshelf] $msg" -ForegroundColor Yellow }
+function Err   { param($msg) Write-Host "[sshelf] ERROR: $msg" -ForegroundColor Red; exit 1 }
 
-Info "Installing RemminaMac on Windows..."
+Info "Installing sshelf on Windows..."
 
 # -- Python check -------------------------------------------------------------
 $PYTHON = $null
@@ -48,7 +48,7 @@ if ($IN_REPO) {
     Info "Updating existing installation..."
     git -C $INSTALL_DIR pull --ff-only
 } else {
-    Info "Cloning RemminaMac to $INSTALL_DIR..."
+    Info "Cloning sshelf to $INSTALL_DIR..."
     git clone --depth=1 $REPO_URL $INSTALL_DIR
 }
 
@@ -85,7 +85,7 @@ if ($userPath -notlike "*$BIN_DIR*") {
         Info "Added $BIN_DIR to user PATH."
         Warn "Restart your terminal for the PATH change to take effect."
     } else {
-        Warn "Skipped. Add this to your PATH manually to run 'remminamac' from anywhere:"
+        Warn "Skipped. Add this to your PATH manually to run 'sshelf' from anywhere:"
         Warn "  $BIN_DIR"
     }
 } else {
@@ -94,6 +94,6 @@ if ($userPath -notlike "*$BIN_DIR*") {
 
 # -- Done ---------------------------------------------------------------------
 Write-Host ""
-Info "RemminaMac installed successfully!"
-Info "Run it with:  remminamac"
-Info "(Restart your terminal if 'remminamac' is not found yet)"
+Info "sshelf installed successfully!"
+Info "Run it with:  sshelf"
+Info "(Restart your terminal if 'sshelf' is not found yet)"

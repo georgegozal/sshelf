@@ -1,20 +1,20 @@
-# RemminaMac uninstaller -- Windows (PowerShell)
+# sshelf uninstaller -- Windows (PowerShell)
 # Usage: powershell -ExecutionPolicy Bypass -File uninstall.ps1
 #Requires -Version 5.1
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$INSTALL_DIR = "$env:LOCALAPPDATA\remminamac"
+$INSTALL_DIR = "$env:LOCALAPPDATA\sshelf"
 
-function Info { param($msg) Write-Host "[remminamac] $msg" -ForegroundColor Green }
-function Warn { param($msg) Write-Host "[remminamac] $msg" -ForegroundColor Yellow }
-function Err  { param($msg) Write-Host "[remminamac] ERROR: $msg" -ForegroundColor Red; exit 1 }
+function Info { param($msg) Write-Host "[sshelf] $msg" -ForegroundColor Green }
+function Warn { param($msg) Write-Host "[sshelf] $msg" -ForegroundColor Yellow }
+function Err  { param($msg) Write-Host "[sshelf] ERROR: $msg" -ForegroundColor Red; exit 1 }
 
 if (-not (Test-Path $INSTALL_DIR)) {
-    Err "RemminaMac does not appear to be installed (expected $INSTALL_DIR)."
+    Err "sshelf does not appear to be installed (expected $INSTALL_DIR)."
 }
 
-$confirm = Read-Host "Remove RemminaMac from $INSTALL_DIR? [y/N]"
+$confirm = Read-Host "Remove sshelf from $INSTALL_DIR? [y/N]"
 if ($confirm -notmatch '^[Yy]') { Write-Host "Aborted."; exit 0 }
 
 Remove-Item -Recurse -Force $INSTALL_DIR
@@ -30,8 +30,8 @@ if ($cleaned -ne $userPath) {
 
 # -- Note about stored data ---------------------------------------------------
 Warn "Your connection database and preferences are kept at:"
-Warn "  $env:APPDATA\RemminaMac\"
+Warn "  $env:APPDATA\sshelf\"
 Warn "Delete that directory manually if you want to remove all saved connections."
 
 Write-Host ""
-Info "RemminaMac uninstalled."
+Info "sshelf uninstalled."

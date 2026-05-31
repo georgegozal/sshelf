@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# RemminaMac installer / updater -- macOS and Linux
+# sshelf installer / updater -- macOS and Linux
 # Usage: bash install.sh
 set -euo pipefail
 
-REPO_URL="https://github.com/georgegozal/remminamac.git"
-INSTALL_DIR="$HOME/.local/share/remminamac"
+REPO_URL="https://github.com/georgegozal/sshelf.git"
+INSTALL_DIR="$HOME/.local/share/sshelf"
 BIN_DIR="$HOME/.local/bin"
-LAUNCHER="$BIN_DIR/remminamac"
-DESKTOP_FILE="$HOME/.local/share/applications/remminamac.desktop"
+LAUNCHER="$BIN_DIR/sshelf"
+DESKTOP_FILE="$HOME/.local/share/applications/sshelf.desktop"
 ICON_SRC="$INSTALL_DIR/assets/screenshot.png"
 
 # -- Colour helpers -----------------------------------------------------------
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()  { echo -e "${GREEN}[remminamac]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[remminamac]${NC} $*"; }
-error() { echo -e "${RED}[remminamac] ERROR:${NC} $*" >&2; exit 1; }
+info()  { echo -e "${GREEN}[sshelf]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[sshelf]${NC} $*"; }
+error() { echo -e "${RED}[sshelf] ERROR:${NC} $*" >&2; exit 1; }
 
 # -- Platform detection -------------------------------------------------------
 PLATFORM=""
@@ -32,7 +32,7 @@ else
   _IN_REPO=false
 fi
 
-info "Installing RemminaMac on ${PLATFORM}..."
+info "Installing sshelf on ${PLATFORM}..."
 
 # -- Python check -------------------------------------------------------------
 PYTHON=""
@@ -64,7 +64,7 @@ elif [[ -d "$INSTALL_DIR/.git" ]]; then
   git -C "$INSTALL_DIR" pull --ff-only
 else
   command -v git &>/dev/null || error "git is required. Install it and re-run."
-  info "Cloning RemminaMac to ${INSTALL_DIR} ..."
+  info "Cloning sshelf to ${INSTALL_DIR} ..."
   git clone --depth=1 "$REPO_URL" "$INSTALL_DIR"
 fi
 
@@ -114,7 +114,7 @@ if [[ "$PLATFORM" == "linux" ]]; then
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=RemminaMac
+Name=sshelf
 Comment=SSH connection manager for macOS and Linux
 Exec=$LAUNCHER %u
 Icon=$ICON_VALUE
@@ -148,7 +148,7 @@ if [[ "$PLATFORM" == "macos" ]]; then
     read -r -p "    Add it to $SHELL_RC automatically? [Y/n] " yn
     if [[ "$yn" != [Nn]* ]]; then
       echo "" >> "$SHELL_RC"
-      echo "# Added by RemminaMac installer" >> "$SHELL_RC"
+      echo "# Added by sshelf installer" >> "$SHELL_RC"
       echo "$PATH_LINE" >> "$SHELL_RC"
       info "Added PATH entry to ${SHELL_RC}"
       export PATH="$BIN_DIR:$PATH"
@@ -158,15 +158,15 @@ if [[ "$PLATFORM" == "macos" ]]; then
     fi
   fi
 
-  APP_BUNDLE="/Applications/RemminaMac.app"
+  APP_BUNDLE="/Applications/sshelf.app"
   info "Creating ${APP_BUNDLE} ..."
   mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 
-  cat > "$APP_BUNDLE/Contents/MacOS/remminamac" << APP_EOF
+  cat > "$APP_BUNDLE/Contents/MacOS/sshelf" << APP_EOF
 #!/bin/bash
 exec "$VENV/bin/python3" "$INSTALL_DIR/main.py"
 APP_EOF
-  chmod +x "$APP_BUNDLE/Contents/MacOS/remminamac"
+  chmod +x "$APP_BUNDLE/Contents/MacOS/sshelf"
 
   cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -174,17 +174,17 @@ APP_EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>RemminaMac</string>
+    <string>sshelf</string>
     <key>CFBundleDisplayName</key>
-    <string>RemminaMac</string>
+    <string>sshelf</string>
     <key>CFBundleIdentifier</key>
-    <string>com.keytype.remminamac</string>
+    <string>com.keytype.sshelf</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>remminamac</string>
+    <string>sshelf</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSMinimumSystemVersion</key>
@@ -199,9 +199,9 @@ fi
 
 # -- Done ---------------------------------------------------------------------
 echo ""
-info "RemminaMac installed successfully!"
+info "sshelf installed successfully!"
 info "Source lives at: ${INSTALL_DIR}"
-info "Run from terminal: remminamac"
+info "Run from terminal: sshelf"
 if [[ "$PLATFORM" == "macos" ]]; then
   info "Or open from Applications / Dock / Spotlight."
   info "(Re-run install.sh at any time to update.)"

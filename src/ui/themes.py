@@ -1,4 +1,4 @@
-"""Terminal colour themes for RemminaMac."""
+"""Terminal colour themes for sshelf."""
 
 from __future__ import annotations
 

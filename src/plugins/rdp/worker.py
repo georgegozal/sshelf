@@ -164,7 +164,7 @@ class RDPWorker(QObject):
         if conn.rdp_domain:
             rdp_lines.append(f"domain:s:{conn.rdp_domain}")
 
-        fd, tmp = tempfile.mkstemp(suffix=".rdp", prefix="remminamac_")
+        fd, tmp = tempfile.mkstemp(suffix=".rdp", prefix="sshelf_")
         with os.fdopen(fd, "w") as f:
             f.write("\r\n".join(rdp_lines) + "\r\n")
         self._tmp_rdp = tmp

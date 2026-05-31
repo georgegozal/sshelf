@@ -76,7 +76,7 @@ def _host_to_connection(h: dict) -> Connection:
 class SshConfigImportDialog(QDialog):
     """
     Shows all Host entries found in an SSH config file and lets the
-    user pick which ones to import into RemminaMac.
+    user pick which ones to import into sshelf.
     """
 
     def __init__(self, db: Database, parent=None) -> None:

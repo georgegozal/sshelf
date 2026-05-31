@@ -43,7 +43,7 @@ class WelcomeWidget(QWidget):
             icon.setStyleSheet("font-size: 64px;")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        title = QLabel("RemminaMac")
+        title = QLabel("sshelf")
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 

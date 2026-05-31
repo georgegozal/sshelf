@@ -4,7 +4,7 @@
 
 ```bash
 git clone <repo>
-cd remminamac
+cd sshelf
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -21,7 +21,7 @@ python main.py
 ## Project layout
 
 ```
-remminamac/
+sshelf/
 ├── main.py                          Entry point — creates QApplication, Database, MainWindow
 ├── requirements.txt
 ├── docs/                            This documentation
@@ -144,7 +144,7 @@ python main.py [-n SUFFIX] [-u]
 ### Inspect the SQLite database
 
 ```bash
-sqlite3 ~/Library/Application\ Support/RemminaMac/connections.db
+sqlite3 ~/Library/Application\ Support/sshelf/connections.db
 .tables
 SELECT id, name, host, username FROM connections;
 SELECT key, value FROM preferences;
@@ -153,10 +153,10 @@ SELECT key, value FROM preferences;
 ### Wipe all data (fresh start)
 
 ```bash
-rm ~/Library/Application\ Support/RemminaMac/connections.db
+rm ~/Library/Application\ Support/sshelf/connections.db
 ```
 
-Keychain entries are not removed by this. Delete them in **Keychain Access.app** → search `RemminaMac` → delete all entries.
+Keychain entries are not removed by this. Delete them in **Keychain Access.app** → search `sshelf` → delete all entries.
 
 ### Changing the terminal colour scheme
 

@@ -343,7 +343,7 @@ class TerminalWidget(QWidget):
     - Auto-reconnect bar shown on unexpected disconnect (errors).
     - Ctrl+F search bar to find text in the scrollback.
     - Session logging toggle (⏺/⏹) in the header — writes plain text to
-      ~/Library/Application Support/RemminaMac/logs/.
+      ~/Library/Application Support/sshelf/logs/.
     - Side panel (⚡ / 📁 buttons) with a Commands tab (SnippetsPanel)
       and an SFTP tab (SFTPPanel).
     """
@@ -726,7 +726,7 @@ class TerminalWidget(QWidget):
         else:
             log_dir = (
                 Path.home() / "Library" / "Application Support"
-                / "RemminaMac" / "logs"
+                / "sshelf" / "logs"
             )
             log_dir.mkdir(parents=True, exist_ok=True)
             ts   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

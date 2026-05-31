@@ -43,7 +43,7 @@ class _KeyGenWorker(QObject):
             key.write_private_key_file(str(path), password=self._passphrase)
 
             pub_path = path.with_suffix(".pub") if path.suffix == "" else Path(str(path) + ".pub")
-            pub_text = f"{key.get_name()} {key.get_base64()} RemminaMac-generated"
+            pub_text = f"{key.get_name()} {key.get_base64()} sshelf-generated"
             pub_path.write_text(pub_text + "\n")
             path.chmod(0o600)
 

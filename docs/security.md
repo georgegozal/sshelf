@@ -9,7 +9,7 @@ Passwords are stored in the **macOS Keychain**, not in SQLite.
 When a connection is saved:
 1. The password is extracted from the `Connection` object in memory.
 2. An empty string is written to the `password` column in SQLite.
-3. The real password is stored in Keychain under service `RemminaMac` and account `<connection_id>`.
+3. The real password is stored in Keychain under service `sshelf` and account `<connection_id>`.
 
 When connections are loaded:
 1. All rows are fetched from SQLite.
@@ -24,11 +24,11 @@ When a connection is deleted:
 
 | Field | Value |
 |-------|-------|
-| Service | `RemminaMac` |
+| Service | `sshelf` |
 | Account | `<connection_id>` (e.g. `42`) |
 | Label | Set by the `keyring` library |
 
-You can view and manage these entries in **Keychain Access.app** → search for `RemminaMac`.
+You can view and manage these entries in **Keychain Access.app** → search for `sshelf`.
 
 ### Legacy plaintext passwords
 
@@ -48,7 +48,7 @@ pip install keyring
 
 ## SSH authentication
 
-RemminaMac supports three authentication methods, tried in order by paramiko:
+sshelf supports three authentication methods, tried in order by paramiko:
 
 1. **SSH key file** — `private_key_file` + optional `passphrase`. Supported key types: RSA, ECDSA, Ed25519 (auto-detected by paramiko).
 2. **Password** — sent over the encrypted SSH channel.
@@ -60,7 +60,7 @@ Passphrases for encrypted key files are treated the same as passwords — stored
 
 ### Jump hosts (ProxyJump)
 
-When a `jump_host` is configured, RemminaMac:
+When a `jump_host` is configured, sshelf:
 1. Opens an SSH connection to the jump host.
 2. Requests a TCP tunnel through it to the target host.
 3. Opens a second SSH session over that tunnel.
@@ -75,7 +75,7 @@ This is equivalent to `ssh -J jump_host target_host`. The jump host connection u
 |------|---------|-------|
 | Passwords | macOS Keychain | Secure |
 | Passphrases | macOS Keychain | Secure |
-| SSH key files | Filesystem (your path) | RemminaMac only stores the path, not the key content |
+| SSH key files | Filesystem (your path) | sshelf only stores the path, not the key content |
 | Usernames | SQLite (plaintext) | Not sensitive |
 | Hostnames / IPs | SQLite (plaintext) | Not sensitive |
 | Connection names, groups, colors | SQLite (plaintext) | Not sensitive |

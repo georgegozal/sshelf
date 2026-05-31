@@ -76,7 +76,7 @@ class MainWindow(QMainWindow):
         self._detached_windows: list[_DetachedWindow] = []
         self._fullscreen_active = False
 
-        title = f"RemminaMac — {name}" if name else "RemminaMac"
+        title = f"sshelf — {name}" if name else "sshelf"
         self.setWindowTitle(title)
         self.setMinimumSize(960, 600)
         self.resize(1200, 720)
@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
 
         # Help
         help_menu: QMenu = mb.addMenu("&Help")
-        act_about = QAction("&About RemminaMac", self)
+        act_about = QAction("&About sshelf", self)
         act_about.triggered.connect(self._on_about)
         help_menu.addAction(act_about)
 
@@ -683,7 +683,7 @@ class MainWindow(QMainWindow):
 
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Connections",
-            str(Path.home() / "remminamac-connections.json"),
+            str(Path.home() / "sshelf-connections.json"),
             "JSON files (*.json)",
         )
         if not path:
@@ -702,7 +702,7 @@ class MainWindow(QMainWindow):
 
         data = {
             "version": "1.0",
-            "app": "RemminaMac",
+            "app": "sshelf",
             "exported_at": datetime.datetime.now().isoformat(),
             "connections": [_conn_dict(c) for c in conns],
         }
@@ -719,7 +719,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_import_connections(self) -> None:
-        """Import connections from a JSON file previously exported by RemminaMac."""
+        """Import connections from a JSON file previously exported by sshelf."""
         from pathlib import Path
         from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
@@ -740,7 +740,7 @@ class MainWindow(QMainWindow):
         if not isinstance(data, dict) or "connections" not in data:
             QMessageBox.critical(
                 self, "Import failed",
-                "File does not look like a RemminaMac export\n"
+                "File does not look like a sshelf export\n"
                 "(missing 'connections' key).",
             )
             return
@@ -832,8 +832,8 @@ class MainWindow(QMainWindow):
 
     def _on_about(self) -> None:
         QMessageBox.about(
-            self, "About RemminaMac",
-            "<b>RemminaMac 0.1.0</b><br><br>"
+            self, "About sshelf",
+            "<b>sshelf 0.1.0</b><br><br>"
             "A Remmina-inspired SSH connection manager for macOS.<br><br>"
             "Built with Python, PyQt6, and paramiko.",
         )
@@ -885,7 +885,7 @@ class MainWindow(QMainWindow):
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
         self._tray = QSystemTrayIcon(self._make_tray_icon(), self)
-        self._tray.setToolTip("RemminaMac")
+        self._tray.setToolTip("sshelf")
         self._tray.activated.connect(self._on_tray_activated)
         self._tray_menu = QMenu()
         self._tray.setContextMenu(self._tray_menu)
@@ -897,7 +897,7 @@ class MainWindow(QMainWindow):
         m = self._tray_menu
         m.clear()
 
-        act_show = QAction("Show RemminaMac", self)
+        act_show = QAction("Show sshelf", self)
         act_show.triggered.connect(self._bring_to_front)
         m.addAction(act_show)
 
@@ -924,7 +924,7 @@ class MainWindow(QMainWindow):
                     recent_menu.addAction(act)
 
         m.addSeparator()
-        act_quit = QAction("Quit RemminaMac", self)
+        act_quit = QAction("Quit sshelf", self)
         act_quit.triggered.connect(QApplication.quit)
         m.addAction(act_quit)
 
@@ -961,7 +961,7 @@ class MainWindow(QMainWindow):
             return
         self._tabs.removeTab(index)
         widget.setParent(None)  # type: ignore[arg-type]
-        _DetachedWindow(widget, f"RemminaMac — {label}", self._detached_windows)
+        _DetachedWindow(widget, f"sshelf — {label}", self._detached_windows)
 
     # ------------------------------------------------------------------
     # Close / persist state

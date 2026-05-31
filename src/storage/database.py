@@ -11,8 +11,8 @@ from src.models.connection import Connection
 from src.storage import keychain
 
 
-# Store DB in ~/Library/Application Support/RemminaMac/
-APP_DATA_DIR = Path.home() / "Library" / "Application Support" / "RemminaMac"
+# Store DB in ~/Library/Application Support/sshelf/
+APP_DATA_DIR = Path.home() / "Library" / "Application Support" / "sshelf"
 DB_PATH = APP_DATA_DIR / "connections.db"
 
 _SCHEMA = """
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS tunnels (
 
 
 class Database:
-    """Thin wrapper around a SQLite database for RemminaMac data."""
+    """Thin wrapper around a SQLite database for sshelf data."""
 
     def __init__(self, path: Path = DB_PATH) -> None:
         self.path = path

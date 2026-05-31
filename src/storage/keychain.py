@@ -7,7 +7,7 @@ Falls back silently if keyring is not installed — passwords remain in SQLite
 
 from __future__ import annotations
 
-_SERVICE = "RemminaMac"
+_SERVICE = "sshelf"
 
 try:
     import keyring as _keyring

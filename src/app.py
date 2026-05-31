@@ -11,11 +11,11 @@ _LINUX = sys.platform.startswith("linux")
 
 
 class Application(QApplication):
-    """RemminaMac application."""
+    """sshelf application."""
 
-    APP_NAME = "RemminaMac"
+    APP_NAME = "sshelf"
     APP_VERSION = "0.1.0"
-    ORG_NAME = "RemminaMac"
+    ORG_NAME = "sshelf"
 
     def __init__(self, argv: list[str], name: str | None = None) -> None:
         super().__init__(argv)

@@ -174,7 +174,7 @@ class SnippetsPanel(QWidget):
             return
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Commands",
-            str(Path.home() / "remminamac-commands.json"),
+            str(Path.home() / "sshelf-commands.json"),
             "JSON files (*.json)",
         )
         if not path:
@@ -182,7 +182,7 @@ class SnippetsPanel(QWidget):
         snippets = self._db.all_snippets(self._conn_id)
         data = {
             "version": "1.0",
-            "app": "RemminaMac",
+            "app": "sshelf",
             "snippets": [
                 {
                     "title":   s["title"],

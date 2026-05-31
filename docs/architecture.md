@@ -2,7 +2,7 @@
 
 ## Overview
 
-RemminaMac follows a layered architecture with a clear separation between storage, protocol handling, UI, and optional plugins.
+sshelf follows a layered architecture with a clear separation between storage, protocol handling, UI, and optional plugins.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -182,7 +182,7 @@ pyte implements a proper VT100/xterm state machine including alt-screen mode (mo
 The Home tab shows connection details on single-click without destroying terminal sessions. It avoids the classic "I clicked the wrong host and killed my SSH session" problem.
 
 **Why `keyring` instead of direct Keychain API calls?**
-`keyring` provides a cross-platform interface and handles the macOS Keychain authorization dialog automatically. If someone runs RemminaMac on Linux, passwords stay in the Secret Service instead of failing silently.
+`keyring` provides a cross-platform interface and handles the macOS Keychain authorization dialog automatically. If someone runs sshelf on Linux, passwords stay in the Secret Service instead of failing silently.
 
 **Why `SplitView` wraps `TerminalWidget` instead of using it directly?**
 This isolates the split-pane logic from the terminal emulator itself. `TerminalWidget` knows nothing about being one of several panes; `SplitView` aggregates health signals and handles the ⊞ button without touching terminal internals.
@@ -258,7 +258,7 @@ The JSON format is:
 ```json
 {
   "version": "1.0",
-  "app": "RemminaMac",
+  "app": "sshelf",
   "exported_at": "2026-03-12T10:00:00",
   "connections": [
     {
