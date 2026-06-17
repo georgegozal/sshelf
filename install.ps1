@@ -63,12 +63,18 @@ Info "Installing Python dependencies..."
 & "$VENV\Scripts\pip.exe" install --quiet --upgrade pip
 & "$VENV\Scripts\pip.exe" install --quiet -r "$INSTALL_DIR\requirements.txt"
 
+# Register the `sshelf` CLI entry point inside the venv.
+# Editable install (-e) so future rsync updates are reflected immediately.
+Info "Registering sshelf CLI entry point..."
+& "$VENV\Scripts\pip.exe" install --quiet -e $INSTALL_DIR
+
 # -- secretstorage is not needed on Windows (keyring uses Credential Manager) -
 
 # -- Batch launcher -----------------------------------------------------------
+# Delegates to the venv's sshelf.exe entry point (CLI + GUI via `sshelf gui`)
 @"
 @echo off
-"$VENV\Scripts\python.exe" "$INSTALL_DIR\main.py" %*
+"$VENV\Scripts\sshelf.exe" %*
 "@ | Set-Content -Encoding ASCII $LAUNCHER
 
 Info "Launcher created: $LAUNCHER"
@@ -95,5 +101,12 @@ if ($userPath -notlike "*$BIN_DIR*") {
 # -- Done ---------------------------------------------------------------------
 Write-Host ""
 Info "sshelf installed successfully!"
-Info "Run it with:  sshelf"
-Info "(Restart your terminal if 'sshelf' is not found yet)"
+Info ""
+Info "CLI usage:"
+Info "  sshelf list                   # list saved connections"
+Info "  sshelf add                    # add a connection interactively"
+Info "  sshelf connect <name>         # open an SSH session in this terminal"
+Info "  sshelf snippet list           # list saved commands"
+Info "  sshelf gui                    # launch the GUI"
+Info "  sshelf --help                 # full command reference"
+Warn "(Restart your terminal if 'sshelf' is not found yet)"

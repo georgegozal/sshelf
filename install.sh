@@ -79,6 +79,11 @@ info "Installing Python dependencies..."
 "$VENV/bin/pip" install --quiet --upgrade pip
 "$VENV/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
 
+# Register the `sshelf` CLI entry point inside the venv.
+# Using editable install (-e) so rsync updates are reflected without reinstalling.
+info "Registering sshelf CLI entry point..."
+"$VENV/bin/pip" install --quiet -e "$INSTALL_DIR"
+
 # -- Linux: optional SecretService backend for keyring ------------------------
 if [[ "$PLATFORM" == "linux" ]]; then
   if "$VENV/bin/python3" -c "import secretstorage" 2>/dev/null; then
@@ -92,10 +97,12 @@ if [[ "$PLATFORM" == "linux" ]]; then
 fi
 
 # -- Shell launcher -----------------------------------------------------------
+# The launcher delegates to the venv's `sshelf` entry point, which supports
+# both CLI subcommands and `sshelf gui` for the GUI.
 mkdir -p "$BIN_DIR"
 cat > "$LAUNCHER" << LAUNCHER_EOF
 #!/usr/bin/env bash
-exec "$VENV/bin/python3" "$INSTALL_DIR/main.py" "\$@"
+exec "$VENV/bin/sshelf" "\$@"
 LAUNCHER_EOF
 chmod +x "$LAUNCHER"
 info "Shell launcher: ${LAUNCHER}"
@@ -164,7 +171,8 @@ if [[ "$PLATFORM" == "macos" ]]; then
 
   cat > "$APP_BUNDLE/Contents/MacOS/sshelf" << APP_EOF
 #!/bin/bash
-exec "$VENV/bin/python3" "$INSTALL_DIR/main.py"
+# .app always opens the GUI
+exec "$VENV/bin/sshelf" gui
 APP_EOF
   chmod +x "$APP_BUNDLE/Contents/MacOS/sshelf"
 
@@ -201,8 +209,16 @@ fi
 echo ""
 info "sshelf installed successfully!"
 info "Source lives at: ${INSTALL_DIR}"
-info "Run from terminal: sshelf"
+echo ""
+info "CLI usage:"
+info "  sshelf list                   # list saved connections"
+info "  sshelf add                    # add a connection interactively"
+info "  sshelf connect <name>         # open an SSH session in this terminal"
+info "  sshelf snippet list           # list saved commands"
+info "  sshelf gui                    # launch the GUI"
+info "  sshelf --help                 # full command reference"
 if [[ "$PLATFORM" == "macos" ]]; then
-  info "Or open from Applications / Dock / Spotlight."
+  echo ""
+  info "GUI: open from Applications / Dock / Spotlight, or run: sshelf gui"
   info "(Re-run install.sh at any time to update.)"
 fi

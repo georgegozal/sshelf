@@ -429,10 +429,6 @@ class ConnectionDialog(QDialog):
 
         c.notes = self._notes.toPlainText().strip()
 
-        # Store 0 when port equals the protocol default (cleaner display)
-        if c.port == _DEFAULT_PORTS.get(c.protocol, 22):
-            c.port = 0
-
     # ------------------------------------------------------------------
     # Validation and accept
     # ------------------------------------------------------------------

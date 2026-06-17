@@ -159,7 +159,7 @@ class DetailWidget(QWidget):
 
         c = self._conn
         row("Host:", c.host)
-        row("Port:", str(c.port))
+        row("Port:", str(c.effective_port()))
         row("Username:", c.username or "(none specified)")
         row("Group:", c.group)
         row("Auth:", c.auth_method())
