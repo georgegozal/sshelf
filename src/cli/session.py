@@ -173,8 +173,12 @@ def _inject_ps1_tag(chan, name: str) -> None:
     Leading space keeps the command out of bash history on most servers.
     """
     name_safe = name.replace("'", r"'\''")  # safe for shell single-quoting
+    # The title OSC is appended AFTER "$PS1" so it runs last and wins over
+    # any existing title sequence in the original PS1 (Ubuntu default PS1
+    # sets the title at its beginning via \e]0;\u@\h: \w\a — ours overrides).
     cmd = (
         f" export PS1='\\[\\e[0;36m\\]({name_safe})\\[\\e[0m\\] '\"$PS1\""
+        f"'\\[\\e]0;({name_safe}) \\u@\\h: \\w\\007\\]'"
         f" 2>/dev/null\n"
     )
     try:
