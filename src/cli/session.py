@@ -92,8 +92,8 @@ def cmd_connect(ref: str) -> None:
                 pass
         signal.signal(signal.SIGWINCH, _on_resize)
 
-    # Inject PS1 tag into the remote shell (best-effort; POSIX remotes)
-    _inject_ps1_tag(chan, conn.display_name())
+    # Show MOTD, inject PS1, drain echo — leaves a clean prompt on screen
+    _startup_sequence(chan, conn.display_name())
 
     # Send startup_command if configured on the connection
     if conn.startup_command:
@@ -141,36 +141,61 @@ def _print_banner(conn) -> None:
     print(f"\033[1m{bar}\033[0m\n")
 
 
-def _inject_ps1_tag(chan, name: str) -> None:
-    """Send a best-effort PS1 modification to the remote shell.
+def _startup_sequence(chan, name: str) -> None:
+    """Display MOTD, inject PS1 tag silently, show the new prompt.
 
-    Waits briefly for the initial shell prompt to appear, then sends an
-    export command that prepends [name] to the existing $PS1 / $PROMPT.
-
-    Notes:
-    - Works for bash and most zsh configurations.
-    - Will be reset by remote .bashrc if the user opens a subshell.
-    - Silently ignored if the remote shell does not support $PS1.
-    - The command is prepended with a space so HISTCONTROL=ignorespace
-      suppresses it from shell history on servers that have that set.
+    Flow:
+      1. Read & display the initial MOTD / welcome text (0.5 s window).
+      2. Send the PS1 export command.
+      3. Drain the echoed command from the channel (suppress it).
+      4. Send a bare newline to trigger the new prompt.
+      5. Read & display the new prompt line.
     """
-    time.sleep(0.35)  # let the remote shell emit its welcome / MOTD
+    _read_channel_for(chan, duration=0.5, display=True)
+    _inject_ps1_tag(chan, name)
+    _read_channel_for(chan, duration=0.3, display=False)  # swallow echo
+    try:
+        chan.sendall(b"\n")
+    except OSError:
+        pass
+    _read_channel_for(chan, duration=0.25, display=True)  # show new prompt
 
-    # Drain any buffered welcome text — it will be forwarded by _passthrough_loop
-    # once the main loop starts; we do not discard it here.
-    # (paramiko buffers it internally so nothing is lost.)
 
-    tag = f"[{name}]"
-    # The leading space hides the command from bash history on many servers.
-    # We set both PS1 (bash) and PROMPT (zsh/fish-ish) and suppress stderr.
+def _inject_ps1_tag(chan, name: str) -> None:
+    """Send a PS1 prefix command to the remote bash shell.
+
+    Uses double-quoted "$PS1" so the current PS1 value is captured at
+    assignment time — this avoids the self-referencing recursion that
+    single-quoted '${PS1:-...}' causes.
+
+    \\[ and \\] are bash PS1 non-printing markers; \\e is the ESC character.
+    Color 36 = cyan for the tag; the original prompt keeps its own colors.
+    Leading space keeps the command out of bash history on most servers.
+    """
+    name_safe = name.replace("'", r"'\''")  # safe for shell single-quoting
     cmd = (
-        f" export PS1='{tag} ${{PS1:-\\u@\\h:\\w\\$ }}' 2>/dev/null; "
-        f"export PROMPT='{tag} ${{PROMPT:-%%n@%%m:%%~ %% }}' 2>/dev/null\n"
+        f" export PS1='\\[\\e[0;36m\\]({name_safe})\\[\\e[0m\\] '\"$PS1\""
+        f" 2>/dev/null\n"
     )
     try:
         chan.sendall(cmd.encode("utf-8", errors="replace"))
     except OSError:
         pass
+
+
+def _read_channel_for(chan, duration: float, display: bool) -> None:
+    """Poll the channel for up to *duration* seconds, optionally writing to stdout."""
+    deadline = time.monotonic() + duration
+    while time.monotonic() < deadline:
+        if channel_ready(chan):
+            try:
+                chunk = chan.recv(4096)
+                if chunk and display:
+                    write_stdout(chunk)
+            except OSError:
+                break
+        else:
+            time.sleep(0.05)
 
 
 def _passthrough_loop(
