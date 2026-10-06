@@ -270,6 +270,10 @@ sshelf/
 | Snippets | Same SQLite database, `snippets` table |
 | Tunnel rules | Same SQLite database, `tunnels` table |
 
+## Contributing
+
+Fork the repo, work on a branch, and open a pull request against [georgegozal/sshelf](https://github.com/georgegozal/sshelf). See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, PR workflow, and commit message conventions.
+
 ## Documentation
 
 Detailed documentation lives in the [`docs/`](docs/) folder:
