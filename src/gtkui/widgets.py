@@ -50,10 +50,18 @@ def hint(text: str) -> Gtk.Label:
     return label
 
 
+def set_placeholder(widget: Gtk.Widget, text: str) -> None:
+    """Set placeholder hint text (GTK 4.8 SearchEntry only exposes a property)."""
+    if hasattr(widget, "set_placeholder_text"):
+        widget.set_placeholder_text(text)
+    else:
+        widget.set_property("placeholder-text", text)
+
+
 def entry(placeholder: str = "") -> Gtk.Entry:
     e = Gtk.Entry()
     if placeholder:
-        e.set_placeholder_text(placeholder)
+        set_placeholder(e, placeholder)
     return e
 
 

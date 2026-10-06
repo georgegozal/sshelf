@@ -70,19 +70,56 @@ fi
 
 # -- Python virtual environment -----------------------------------------------
 VENV="$INSTALL_DIR/.venv"
+
+_venv_site_packages() {
+  "$VENV/bin/python3" -c 'import site; print(site.getsitepackages()[0])'
+}
+
+# GTK4 uses system PyGObject; isolated venvs cannot import `gi` without this.
+_link_system_gi_into_venv() {
+  local dist site pth
+  for dist in /usr/lib/python3/dist-packages; do
+    [[ -f "${dist}/gi/__init__.py" ]] || continue
+    site="$(_venv_site_packages)"
+    pth="${site}/sshelf-system-gi.pth"
+    if [[ "$(cat "$pth" 2>/dev/null)" != "$dist" ]]; then
+      echo "$dist" > "$pth"
+      info "Linked system PyGObject into the venv (required for sshelf gui --gtk)."
+    fi
+    return 0
+  done
+  return 1
+}
+
 if [[ ! -d "$VENV" ]]; then
   info "Creating virtual environment..."
   "$PYTHON" -m venv "$VENV"
 fi
+if [[ "$PLATFORM" == "linux" ]]; then
+  _link_system_gi_into_venv || true
+fi
+
+# pip walks every package on sys.path; our gi .pth adds Debian dist-packages,
+# whose send2trash/dtrx metadata triggers harmless parse warnings — hide those.
+_pip() {
+  local out rc=0
+  out=$("$VENV/bin/pip" "$@" 2>&1) || rc=$?
+  if [[ -n "$out" ]]; then
+    printf '%s\n' "$out" | grep -v -E \
+      'WARNING: Error parsing dependencies of (send2trash|dtrx)|sys-platform \(==|platform==unsupported|platform_system|Expected (matching|semicolon)|^[[:space:]]*[~^]+[[:space:]]*$' \
+      || true
+  fi
+  return "$rc"
+}
 
 info "Installing Python dependencies..."
-"$VENV/bin/pip" install --quiet --upgrade pip
-"$VENV/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
+_pip install --quiet --upgrade pip
+_pip install --quiet -r "$INSTALL_DIR/requirements.txt"
 
 # Register the `sshelf` CLI entry point inside the venv.
 # Using editable install (-e) so rsync updates are reflected without reinstalling.
 info "Registering sshelf CLI entry point..."
-"$VENV/bin/pip" install --quiet -e "$INSTALL_DIR"
+_pip install --quiet -e "$INSTALL_DIR"
 
 # -- Linux: optional SecretService backend for keyring ------------------------
 if [[ "$PLATFORM" == "linux" ]]; then
@@ -92,7 +129,7 @@ if [[ "$PLATFORM" == "linux" ]]; then
     warn "secretstorage not found. Passwords will be stored in a local file instead of"
     warn "GNOME Keyring / KWallet. Install it for better security:"
     warn "  pip install secretstorage   (or: apt install python3-secretstorage)"
-    "$VENV/bin/pip" install --quiet secretstorage 2>/dev/null || true
+    _pip install --quiet secretstorage 2>/dev/null || true
   fi
 fi
 
@@ -217,6 +254,17 @@ info "  sshelf connect <name>         # open an SSH session in this terminal"
 info "  sshelf snippet list           # list saved commands"
 info "  sshelf gui                    # launch the GUI"
 info "  sshelf --help                 # full command reference"
+if [[ "$PLATFORM" == "linux" ]]; then
+  echo ""
+  if ! "$VENV/bin/python3" -c "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk" 2>/dev/null; then
+    warn "GTK4 GUI (sshelf gui --gtk) is not ready on this system yet."
+    warn "Install system packages, then re-run this installer:"
+    warn "  sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-vte-3.91"
+    warn "Default PyQt GUI works without these:  sshelf gui"
+  else
+    info "GTK4 GUI available:  sshelf gui --gtk"
+  fi
+fi
 if [[ "$PLATFORM" == "macos" ]]; then
   echo ""
   info "GUI: open from Applications / Dock / Spotlight, or run: sshelf gui"

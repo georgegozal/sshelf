@@ -252,6 +252,9 @@ def _launch_gui(args: argparse.Namespace) -> None:
     name = getattr(args, "name", None)
 
     if getattr(args, "gtk", False):
+        from src.gtkui.runtime_check import require_gtk_runtime
+
+        require_gtk_runtime()
         from src.gtkui.app import run
         sys.exit(run(name=name))
 

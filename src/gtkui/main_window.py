@@ -8,6 +8,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, Gtk, Pango  # noqa: E402
 
 from src.gtkui.connection_tree import ConnectionTree
+from src.gtkui.widgets import set_placeholder
 from src.models.connection import Connection
 from src.storage.database import Database
 
@@ -44,14 +45,14 @@ class MainWindow(Gtk.ApplicationWindow):
         header.pack_start(new_btn)
 
         self._search = Gtk.SearchEntry()
-        self._search.set_placeholder_text("Search connections…")
+        set_placeholder(self._search, "Search connections…")
         self._search.set_max_width_chars(24)
         self._search.connect("search-changed",
                              lambda e: self._tree.filter(e.get_text()))
         header.pack_start(self._search)
 
         self._quick = Gtk.Entry()
-        self._quick.set_placeholder_text("user@host:port")
+        set_placeholder(self._quick, "user@host:port")
         self._quick.set_max_width_chars(22)
         self._quick.connect("activate", self._on_quick_connect)
         header.pack_end(self._quick)
