@@ -16,6 +16,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, Gtk  # noqa: E402
 
+from src.gtkui.appearance import apply_from_database
 from src.gtkui.main_window import MainWindow
 from src.storage.database import Database
 
@@ -37,6 +38,7 @@ class Application(Gtk.Application):
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
         self._db = Database()
+        apply_from_database(self._db)
 
     def do_activate(self) -> None:
         if self._window is None:

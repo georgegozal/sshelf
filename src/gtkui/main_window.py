@@ -238,7 +238,10 @@ class MainWindow(Gtk.ApplicationWindow):
         ).present()
 
     def _apply_preferences(self) -> None:
-        """Push changed preferences into open terminals."""
+        """Push changed preferences into the shell and open terminals."""
+        from src.gtkui.appearance import apply_from_database
+
+        apply_from_database(self.db)
         for i in range(self._notebook.get_n_pages()):
             page = self._notebook.get_nth_page(i)
             if hasattr(page, "apply_appearance"):
