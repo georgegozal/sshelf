@@ -18,6 +18,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, Gtk  # noqa: E402
 
+from src.gtkui.widgets import color_picker_button
 from src.models.connection import Connection
 from src.storage.database import Database
 
@@ -215,8 +216,7 @@ class ConnectionDialog(Gtk.Window):
         form.add_separator()
 
         colour_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._colour_btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog())
-        self._colour_btn.set_tooltip_text("Pick a colour label for this connection")
+        self._colour_btn = color_picker_button("Pick a colour label for this connection")
         self._colour_btn.connect("notify::rgba", self._on_colour_picked)
         colour_row.append(self._colour_btn)
         clear = Gtk.Button(label="Clear")

@@ -73,6 +73,17 @@ def spin(lo: int, hi: int, value: int, step: int = 1) -> Gtk.SpinButton:
     return s
 
 
+def color_picker_button(tooltip: str = "") -> Gtk.Widget:
+    """Connection colour swatch (ColorDialogButton needs GTK >= 4.10)."""
+    if hasattr(Gtk, "ColorDialogButton"):
+        btn = Gtk.ColorDialogButton.new(Gtk.ColorDialog())
+    else:
+        btn = Gtk.ColorButton()
+    if tooltip:
+        btn.set_tooltip_text(tooltip)
+    return btn
+
+
 def toolbar_button(icon_name: str, tooltip: str) -> Gtk.Button:
     btn = Gtk.Button.new_from_icon_name(icon_name)
     btn.set_tooltip_text(tooltip)
