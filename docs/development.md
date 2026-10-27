@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-git clone <repo>
+git clone https://github.com/georgegozal/sshelf.git
 cd sshelf
 
 python3 -m venv .venv

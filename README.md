@@ -1,8 +1,17 @@
 # SSHelf
 
+[![Stars](https://img.shields.io/github/stars/georgegozal/sshelf?style=flat-square)](https://github.com/georgegozal/sshelf/stargazers)
+[![Forks](https://img.shields.io/github/forks/georgegozal/sshelf?style=flat-square)](https://github.com/georgegozal/sshelf/network/members)
+[![License: AGPL-3.0](https://img.shields.io/github/license/georgegozal/sshelf?style=flat-square)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/georgegozal/sshelf)
+[![Contributing](https://img.shields.io/badge/contributing-guide-7c3aed?style=flat-square)](CONTRIBUTING.md)
+
 A Remmina-inspired SSH connection manager for macOS, Linux, and Windows, built with Python and PyQt6.
 
 An experimental GTK4 build is also in progress (Linux only, SSH sessions only so far) — see [GTK4 build](#gtk4-build-experimental) below.
+
+**Contents:** [Features](#features) · [Requirements](#requirements) · [Installation](#installation) · [Run](#run) · [GTK4 build](#gtk4-build-experimental) · [Shortcuts](#keyboard-shortcuts) · [Contributing](#contributing) · [Docs](#documentation) · [Support](#support) · [License](#license)
 
 ![sshelf screenshot](assets/screenshot.png)
 
@@ -273,6 +282,14 @@ sshelf/
 ## Contributing
 
 Fork the repo, work on a branch, and open a pull request against [georgegozal/sshelf](https://github.com/georgegozal/sshelf). See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, PR workflow, and commit message conventions.
+
+## Support
+
+SSHelf is **free software** ([AGPL-3.0](LICENSE)). You can use, study, modify, and share it under that license — no account or payment required.
+
+If the app saves you time, optional tips help fund maintenance (bug fixes, docs, and the [GTK4 build](#gtk4-build-experimental)). Tips do not unlock extra features or a “pro” edition.
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-FFDD00?style=flat-square&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/georgegozal)
 
 ## Documentation
 
